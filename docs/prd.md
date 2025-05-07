@@ -54,6 +54,8 @@ Based on the project brief's preference for a phased rollout, the initial MVP wi
 ### 5.2. Chat Functionality (Core MVP)
 *   FR3: Users must be able to send and receive real-time messages in a chat room.
 *   FR3.1: The system will start with one main default chat room, which will always exist.
+*   FR3.2: Authenticated users must be able to edit their own sent messages.
+*   FR3.3: Authenticated users must be able to delete their own sent messages.
 *   FR4: The system must display a list of currently active users in a chat room (e.g., avatar stack).
 *   FR5: (Future) Users should be able to @mention songs, artists, or playlists in messages.
 *   FR6: (Future) @mentions should display as rich UI cards (song image, artist image, playlist image).
