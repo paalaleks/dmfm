@@ -25,7 +25,7 @@ playlist-chat-rooms/
 │   │           ├── ChatInput.tsx
 │   │           ├── MessageList.tsx
 │   │           └── AvatarStack.tsx
-│   ├── _actions/               # Next.js Server Actions (co-located or in lib/actions)
+│   ├── _actions/               # Next.js Server Actions (co-located)
 │   │   └── chatActions.ts
 │   ├── api/                    # API routes (if Server Actions are not sufficient)
 │   │   └── health/
@@ -35,9 +35,6 @@ playlist-chat-rooms/
 │   └── globals.css             # Global styles (Tailwind base, custom global styles)
 ├── components/                 # Shared/reusable UI components (Shadcn UI based)
 │   ├── ui/                     # Shadcn UI components (as installed)
-│   └── custom/                 # Custom reusable components
-│       ├── UserAvatar.tsx
-│       └── SpotifyLoginButton.tsx
 ├── config/                     # Application configuration (e.g., site metadata, feature flags)
 │   └── site.ts
 ├── context/                    # React Context providers

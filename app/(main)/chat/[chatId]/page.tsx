@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { RealtimeChat } from '@/components/realtime-chat';
 // import type { Tables } from '@/types/database'; // Removed unused import
-import type { MessageSenderProfile } from '@/hooks/use-realtime-chat';
+import type { MessageSenderProfile, ChatMessage } from '@/hooks/use-realtime-chat';
 // import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'; // Already removed
 
 interface ChatRoomPagePromise {
@@ -27,7 +27,6 @@ export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
 
   const userId = user.id;
 
-  // Fetch the user's full profile (id, username, avatar_url)
   const { data: currentUserProfileData, error: profileError } = await supabase
     .from('profiles')
     .select('id, username, avatar_url') // Fetch id, username, and avatar_url
@@ -51,58 +50,60 @@ export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
   // We can assert it for TypeScript if direct usage as prop causes issues, or rely on the component prop type.
 
   // Fetch initial messages for the room - THIS LOGIC WILL BE MOVED TO THE CLIENT
-  // let initialMessages: ChatMessage[] = [];
-  //
-  // const { data: initialMessagesData, error: messagesError } = await supabase
-  //   .from('chat_messages')
-  //   .select(
-  //     `
-  //     id,
-  //     content,
-  //     created_at,
-  //     user_id,
-  //     room_id,
-  //     profile:profiles (
-  //       id,
-  //       username,
-  //       avatar_url
-  //     )
-  //   `
-  //   )
-  //   .eq('room_id', chatId)
-  //   .order('created_at', { ascending: true })
-  //   .limit(50);
-  //
-  // if (messagesError) {
-  //   console.error(`Error fetching initial messages for room ${chatId}:`, messagesError);
-  // } else if (initialMessagesData) {
-  //   initialMessages = initialMessagesData
-  //     .map((msg) => {
-  //       let userProfile: MessageSenderProfile | null = null;
-  //       if (msg.profile) {
-  //         if (Array.isArray(msg.profile)) {
-  //           userProfile = msg.profile.length > 0 ? (msg.profile[0] as MessageSenderProfile) : null;
-  //         } else {
-  //           userProfile = msg.profile as MessageSenderProfile;
-  //         }
-  //       }
-  //
-  //       if (!msg.created_at) {
-  //         console.warn(
-  //           'Message found with null created_at, using current time as fallback:',
-  //           msg.id
-  //         );
-  //       }
-  //
-  //       return {
-  //         id: msg.id as number | string,
-  //         content: msg.content as string,
-  //         created_at: msg.created_at || new Date().toISOString(),
-  //         profile: userProfile,
-  //       };
-  //     })
-  //     .filter(Boolean) as ChatMessage[];
-  // }
+  let initialMessages: ChatMessage[] = [];
+
+  const { data: initialMessagesData, error: messagesError } = await supabase
+    .from('chat_messages')
+    .select(
+      `
+      id,
+      content,
+      created_at,
+      user_id,
+      room_id,
+      profile:profiles (
+        id,
+        username,
+        avatar_url
+      )
+    `
+    )
+    .eq('room_id', chatId)
+    .order('created_at', { ascending: true })
+    .limit(50);
+
+  if (messagesError) {
+    console.error(`Error fetching initial messages for room ${chatId}:`, messagesError);
+  } else if (initialMessagesData) {
+    initialMessages = initialMessagesData
+      .map((msg) => {
+        let userProfile: MessageSenderProfile | null = null;
+        if (msg.profile) {
+          if (Array.isArray(msg.profile)) {
+            userProfile = msg.profile.length > 0 ? (msg.profile[0] as MessageSenderProfile) : null;
+          } else {
+            userProfile = msg.profile as MessageSenderProfile;
+          }
+        }
+
+        if (!msg.created_at) {
+          console.warn(
+            'Message found with null created_at, using current time as fallback:',
+            msg.id
+          );
+        }
+
+        return {
+          id: msg.id as number | string,
+          clientSideId: msg.id.toString(), // Add clientSideId for SSR messages
+          content: msg.content as string,
+          created_at: msg.created_at || new Date().toISOString(),
+          profile: userProfile,
+          isOptimistic: false, // SSR messages are not optimistic
+        };
+      })
+      .filter(Boolean) as ChatMessage[];
+  }
 
   // Optional: Validate if the chatId exists as a room or if user has access
   // For MVP, we might assume valid chatId if the user navigates here.
@@ -123,11 +124,11 @@ export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
   // For now, RealtimeChat will start with an empty list passed via props or its own internal state.
 
   return (
-    <div className='h-screen flex flex-col'>
+    <div className='h-[calc(100vh-5rem)] flex flex-col'>
       <RealtimeChat
         roomName={chatId}
         currentUserProfile={currentUserProfile}
-        initialMessages={[]} // Pass empty array, client will fetch
+        initialMessages={initialMessages} // Pass empty array, client will fetch
       />
     </div>
   );

@@ -7,9 +7,8 @@ import { type ChatMessage, useRealtimeChat } from '@/hooks/use-realtime-chat';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Send } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { MessageSenderProfile } from '@/hooks/use-realtime-chat';
-import { CurrentUserAvatar } from '@/components/current-user-avatar';
 
 interface RealtimeChatProps {
   roomName: string;
@@ -35,7 +34,7 @@ export const RealtimeChat = ({
   const { containerRef, scrollToBottom } = useChatScroll();
 
   const {
-    messages: realtimeMessages,
+    messages: allMessages,
     sendMessage,
     isConnected,
     handleEditMessageSubmit,
@@ -46,21 +45,6 @@ export const RealtimeChat = ({
     initialMessages,
   });
   const [newMessage, setNewMessage] = useState('');
-
-  // Transform presentUsers into the format expected by RealtimeAvatarStack
-
-  // Merge realtime messages with initial messages
-  const allMessages = useMemo(() => {
-    const mergedMessages = [...initialMessages, ...realtimeMessages];
-    // Remove duplicates based on message id
-    const uniqueMessages = mergedMessages.filter(
-      (message, index, self) => index === self.findIndex((m) => m.id === message.id)
-    );
-    // Sort by creation date
-    const sortedMessages = uniqueMessages.sort((a, b) => a.created_at.localeCompare(b.created_at));
-
-    return sortedMessages;
-  }, [initialMessages, realtimeMessages]);
 
   useEffect(() => {
     if (onMessage) {
@@ -93,7 +77,7 @@ export const RealtimeChat = ({
       {/* Header area for Room Info / Presence */}
 
       {/* Messages Area */}
-      <div ref={containerRef} className='flex-1 overflow-y-auto p-4 space-y-4'>
+      <div ref={containerRef} className='flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide'>
         {allMessages.length === 0 ? (
           <div className='text-center text-sm text-muted-foreground'>
             No messages yet. Start the conversation!
@@ -104,10 +88,16 @@ export const RealtimeChat = ({
             const prevMessage = index > 0 ? allMessages[index - 1] : null;
             const showHeader =
               !prevMessage || prevMessage.profile?.username !== message.profile?.username;
+            console.log(`[RealtimeChat] Mapping message ${index + 1}/${allMessages.length}:`, {
+              messageId: message.id,
+              clientSideId: message.clientSideId,
+              content: message.content?.substring(0, 20) + '...',
+              isOptimistic: message.isOptimistic,
+            });
 
             return (
               <div
-                key={message.clientSideId || message.id}
+                key={message.clientSideId}
                 className='animate-in fade-in slide-in-from-bottom-4 duration-300'
               >
                 <ChatMessageItem
@@ -128,9 +118,6 @@ export const RealtimeChat = ({
         onSubmit={handleSendMessage}
         className='flex items-center w-full gap-2 border-t border-border p-4'
       >
-        <div className='flex-shrink-0'>
-          <CurrentUserAvatar />
-        </div>
         <Input
           className={cn('rounded-full bg-background text-sm transition-all duration-300 flex-1')}
           type='text'

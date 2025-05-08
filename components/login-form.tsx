@@ -27,34 +27,34 @@ export function LoginForm({
 
     try {
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: "spotify",
+        provider: 'spotify',
         options: {
           scopes:
-            "user-read-email user-read-private, streaming, user-modify-playback-state, user-read-playback-state, playlist-modify-public, user-library-read, user-library-modify",
+            'user-read-email user-read-private, streaming, user-modify-playback-state, user-read-playback-state, playlist-modify-public, user-library-read, user-library-modify, user-top-read',
           redirectTo: `${window.location.origin}/auth/oauth?next=/rooms`,
         },
       });
 
       if (error) throw error;
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      setError(error instanceof Error ? error.message : 'An error occurred');
       setIsLoading(false);
     }
   };
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+    <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Welcome!</CardTitle>
+          <CardTitle className='text-2xl'>Welcome!</CardTitle>
           <CardDescription>Sign in to your account to continue</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSocialLogin}>
-            <div className="flex flex-col gap-6">
-              {error && <p className="text-sm text-destructive-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Continue with Github"}
+            <div className='flex flex-col gap-6'>
+              {error && <p className='text-sm text-destructive-500'>{error}</p>}
+              <Button type='submit' className='w-full' disabled={isLoading}>
+                {isLoading ? 'Logging in...' : 'Continue with Spotify'}
               </Button>
             </div>
           </form>

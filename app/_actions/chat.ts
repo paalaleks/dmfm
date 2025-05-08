@@ -9,6 +9,7 @@ import type { Tables } from '@/types/database';
 const sendMessageSchema = z.object({
   roomId: z.string().uuid(),
   content: z.string().min(1, 'Message cannot be empty').max(1000, 'Message too long'),
+  clientSideId: z.string().uuid(),
 });
 
 // Schema for editing a message
@@ -26,7 +27,7 @@ export interface ActionResult {
   success: boolean;
   message?: string;
   error?: string | null;
-  data?: Partial<Tables<'chat_messages'>> | null;
+  data?: (Partial<Tables<'chat_messages'>> & { originalClientSideId?: string }) | null;
 }
 
 export async function sendMessage(
@@ -48,6 +49,7 @@ export async function sendMessage(
   const rawInput = {
     roomId: formData.get('roomId') as string,
     content: formData.get('content') as string,
+    clientSideId: formData.get('clientSideId') as string,
   };
 
   const validatedInput = sendMessageSchema.safeParse(rawInput);
@@ -59,7 +61,7 @@ export async function sendMessage(
     };
   }
 
-  const { roomId, content } = validatedInput.data;
+  const { roomId, content, clientSideId } = validatedInput.data;
 
   // 3. Insert message into the database
   try {
@@ -81,7 +83,11 @@ export async function sendMessage(
     // Optional: Revalidate path
     // revalidatePath(`/chat/${roomId}`) // Example
 
-    return { success: true, message: 'Message sent', data: messageData };
+    return {
+      success: true,
+      message: 'Message sent',
+      data: { ...messageData, originalClientSideId: clientSideId },
+    };
   } catch (e: unknown) {
     let errorMessage = 'An unexpected error occurred';
     if (e instanceof Error) {
