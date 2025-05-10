@@ -1,5 +1,7 @@
-import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@/hooks/use-realtime-chat";
+'use client';
+
+import { cn } from '@/lib/utils';
+import type { ChatMessage } from '@/hooks/use-realtime-chat';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 // import { Textarea } from "@/components/ui/textarea"; // Explicitly commenting out/removing

@@ -7,6 +7,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 export const CurrentUserAvatar = () => {
   const profileImage = useCurrentUserImage()
   const name = useCurrentUserName()
+
+  console.log('profileImage', profileImage);
   const initials = name
     ?.split(' ')
     ?.map((word) => word[0])

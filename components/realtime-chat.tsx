@@ -7,7 +7,7 @@ import { type ChatMessage, useRealtimeChat } from '@/hooks/use-realtime-chat';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Send } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MessageSenderProfile } from '@/hooks/use-realtime-chat';
 
 interface RealtimeChatProps {
@@ -31,7 +31,9 @@ export const RealtimeChat = ({
   onMessage,
   initialMessages = [],
 }: RealtimeChatProps) => {
-  const { containerRef, scrollToBottom } = useChatScroll();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const { scrollToBottom } = useChatScroll(containerRef as React.RefObject<HTMLDivElement>);
 
   const {
     messages: allMessages,
@@ -88,17 +90,11 @@ export const RealtimeChat = ({
             const prevMessage = index > 0 ? allMessages[index - 1] : null;
             const showHeader =
               !prevMessage || prevMessage.profile?.username !== message.profile?.username;
-            console.log(`[RealtimeChat] Mapping message ${index + 1}/${allMessages.length}:`, {
-              messageId: message.id,
-              clientSideId: message.clientSideId,
-              content: message.content?.substring(0, 20) + '...',
-              isOptimistic: message.isOptimistic,
-            });
 
             return (
               <div
                 key={message.clientSideId}
-                className='animate-in fade-in slide-in-from-bottom-4 duration-300'
+                className='animate-in fade-in slide-in-from-bottom-4 duration-300 z-20 relative'
               >
                 <ChatMessageItem
                   message={message}
@@ -116,7 +112,7 @@ export const RealtimeChat = ({
       {/* Input Area */}
       <form
         onSubmit={handleSendMessage}
-        className='flex items-center w-full gap-2 border-t border-border p-4'
+        className='flex items-center w-full gap-2 border-t border-border p-4 z-20 relative'
       >
         <Input
           className={cn('rounded-full bg-background text-sm transition-all duration-300 flex-1')}

@@ -148,9 +148,9 @@ The project will be broken down into the following epics, aligned with the phase
 *   **Epic 2: Playlist Management and Taste Profiling**
     *   *Goal:* Establish mechanisms for ingesting user-related playlist data (from shared/played playlists and user's Spotify top items) and performing initial taste profiling. This will enable later matching for room assignments and playlist recommendations (supports FR19, FR20, FR21, FR22).
 *   **Epic 3: Spotify Player and Music Interaction**
-    *   *Goal:* Allow users to control Spotify playback asynchronously (playing playlists from other users based on taste profiles) and interact with Spotify content (save, follow) (supports FR7-FR16).
+    *   *Goal:* Allow users to control Spotify playback asynchronously (playing playlists from other users based on taste profiles) and interact with Spotify content (save, follow) (supports FR7-FR15).
 *   **Epic 4: Enhanced Chat Experience (@mentions)**
-    *   *Goal:* Enrich chat with @mention capabilities for songs, artists, and playlists (supports FR5, FR6).
+    *   *Goal:* Enrich chat with @mention capabilities for songs, artists, and playlists (supports FR5, FR6, FR16).
 *   **Epic 5: Taste-Driven Dynamic Room System**
     *   *Goal:* Implement dynamic room creation, leveraging taste profiles to group users and enhance music discovery (supports FR17, FR18).
 

@@ -23,6 +23,7 @@ export default async function ProfilePage() {
   let topTracks: TopTrack[] = [];
   let fetchError: string | null = null;
 
+  
   if (user) {
     const { data: artistsData, error: artistsError } = await supabase
       .from('user_top_artists')
@@ -59,7 +60,7 @@ export default async function ProfilePage() {
   }
 
   return (
-    <div className='container mx-auto p-4'>
+    <div className='container mx-auto p-4 z-10 relative'>
       <h2 className='text-3xl font-bold mb-6'>User&apos;s Profile</h2>
 
       {/* Playlist Import Form - keeping existing component */}

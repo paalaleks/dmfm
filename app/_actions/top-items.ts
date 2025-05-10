@@ -2,7 +2,7 @@ import { SpotifyApi, type AccessToken } from '@spotify/web-api-ts-sdk';
 import type { Database } from '@/types/database'; // Import generated DB types
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server'; // For server-side Supabase client
 import type { ActionResult } from '@/types/actions'; // Standardized ActionResult
-
+import { User } from '@supabase/supabase-js';
 // Define DB table row types locally for convenience
 type UserTopArtistInsert = Database['public']['Tables']['user_top_artists']['Insert'];
 type UserTopTrackInsert = Database['public']['Tables']['user_top_tracks']['Insert'];
@@ -13,44 +13,62 @@ interface TopItemsResultData {
   tracksUpserted: number;
 }
 
-export async function fetchAndStoreUserTopItems(): Promise<
-  ActionResult<TopItemsResultData | null>
-> {
+export async function fetchAndStoreUserTopItems(
+  user: User
+): Promise<ActionResult<TopItemsResultData | null>> {
   const supabase = await createSupabaseServerClient();
 
-  // 1. Get current user and session
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError) {
-    console.error('[Server Action] Error getting session:', sessionError.message);
-    return { success: false, error: 'Error getting session: ' + sessionError.message };
+  if (!user) {
+    console.error('[Server Action] User not authenticated.');
+    return { success: false, error: 'User not authenticated.' };
   }
 
-  if (!session || !session.user || !session.provider_token) {
-    console.error('[Server Action] User not authenticated or Spotify token not found.');
-    return { success: false, error: 'User not authenticated or Spotify token not available.' };
+  const userId = user.id;
+
+  // Correctly access provider tokens and expiry from user_metadata, handling potential nulls
+  const spotifyProviderTokenFromMeta = user.user_metadata?.provider_token;
+  const spotifyProviderToken =
+    spotifyProviderTokenFromMeta === null
+      ? undefined
+      : (spotifyProviderTokenFromMeta as string | undefined);
+
+  const spotifyProviderRefreshTokenFromMeta = user.user_metadata?.provider_refresh_token;
+  const spotifyProviderRefreshToken =
+    spotifyProviderRefreshTokenFromMeta === null
+      ? undefined
+      : (spotifyProviderRefreshTokenFromMeta as string | undefined);
+
+  const spotifyProviderTokenExpiresAtFromMeta = user.user_metadata?.provider_token_expires_at;
+  const spotifyProviderTokenExpiresAt =
+    spotifyProviderTokenExpiresAtFromMeta === null
+      ? undefined
+      : (spotifyProviderTokenExpiresAtFromMeta as number | undefined);
+
+  if (!spotifyProviderToken) {
+    console.error(
+      '[Server Action] Spotify provider_token not found in user_metadata. Please re-authenticate.'
+    );
+    return { success: false, error: 'Spotify provider_token not found. Please re-authenticate.' };
   }
 
-  const userId = session.user.id;
-  const spotifyAccessToken = session.provider_token;
+  // spotifyProviderToken is now confirmed to be a string
 
-  // Retrieve Spotify Client ID from environment variables
   const spotifyClientId = process.env.SPOTIFY_CLIENT_ID;
   if (!spotifyClientId) {
     console.error('[Server Action] SPOTIFY_CLIENT_ID environment variable not set.');
     return { success: false, error: 'Server configuration error: Spotify Client ID missing.' };
   }
 
-  const spotify = SpotifyApi.withAccessToken(spotifyClientId, {
-    access_token: spotifyAccessToken,
+  const tokenDetails: AccessToken = {
+    access_token: spotifyProviderToken as string, // Explicitly cast after check
     token_type: 'Bearer',
-    expires_in: 3600, // Placeholder, actual expiry managed by Supabase/Spotify
-    refresh_token: session.provider_refresh_token || undefined,
-    scope: 'user-top-read', // Provide the required scope
-  } as AccessToken);
+    expires_in: spotifyProviderTokenExpiresAt
+      ? spotifyProviderTokenExpiresAt - Math.floor(Date.now() / 1000)
+      : 3600,
+    refresh_token: spotifyProviderRefreshToken as string, // Correctly string | undefined
+  };
+
+  const spotify = SpotifyApi.withAccessToken(spotifyClientId, tokenDetails);
 
   console.log(`[Server Action] Starting fetchAndStoreUserTopItems for user: ${userId}`);
 

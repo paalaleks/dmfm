@@ -1,8 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { RealtimeChat } from '@/components/realtime-chat';
-// import type { Tables } from '@/types/database'; // Removed unused import
 import type { MessageSenderProfile, ChatMessage } from '@/hooks/use-realtime-chat';
+import { RealtimeChat } from '@/components/realtime-chat';
 // import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'; // Already removed
 
 interface ChatRoomPagePromise {
@@ -105,30 +104,19 @@ export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
       .filter(Boolean) as ChatMessage[];
   }
 
-  // Optional: Validate if the chatId exists as a room or if user has access
-  // For MVP, we might assume valid chatId if the user navigates here.
-  // Example check:
-  // const { data: roomExists, error: roomError } = await supabase
-  //   .from('chat_rooms')
-  //   .select('id')
-  //   .eq('id', chatId)
-  //   .maybeSingle()
-  // if (roomError || !roomExists) {
-  //   console.error(`Chat room with ID ${chatId} not found or error:`, roomError);
-  //   // redirect('/chat?error=room_not_found'); // Or to a 404 page
-  //   return <div>Room not found</div>;
-  // }
-
-  // TODO: Fetch initial messages for the room using `chatId`.
-  // This is part of TSC-5.
-  // For now, RealtimeChat will start with an empty list passed via props or its own internal state.
-
   return (
-    <div className='h-[calc(100vh-5rem)] flex flex-col'>
+    <div className='h-dvh flex flex-col relative pt-10'>
+      {/* <div
+        className='absolute left-0 right-0 top-12
+                 bg-gradient-to-b from-teal-dark to-transparent
+                 h-14
+                 z-40 
+                 pointer-events-none'
+      /> */}
       <RealtimeChat
         roomName={chatId}
         currentUserProfile={currentUserProfile}
-        initialMessages={initialMessages} // Pass empty array, client will fetch
+        initialMessages={initialMessages}
       />
     </div>
   );

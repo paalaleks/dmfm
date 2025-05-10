@@ -1,3 +1,5 @@
+'use server';
+
 interface SpotifyTokenResponse {
   access_token: string;
   token_type: string;
@@ -7,11 +9,10 @@ interface SpotifyTokenResponse {
 // In-memory cache for the token
 let spotifyAccessToken: string | null = null;
 let tokenExpiryTime: number | null = null;
+const clientId = process.env.SPOTIFY_CLIENT_ID;
+const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
-async function getSpotifyAccessToken(): Promise<string | null> {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-
+export async function getSpotifyAccessToken(): Promise<string | null> {
   if (!clientId || !clientSecret) {
     console.error('Spotify client ID or secret not configured in environment variables.');
     return null;
@@ -55,7 +56,3 @@ async function getSpotifyAccessToken(): Promise<string | null> {
     return null;
   }
 }
-
-// We can add more Spotify API helper functions here later
-
-export { getSpotifyAccessToken };

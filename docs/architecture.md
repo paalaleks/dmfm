@@ -167,3 +167,74 @@ The system comprises the following major components:
 | Change        | Date       | Version | Description                  | Author         |
 | ------------- | ---------- | ------- | ---------------------------- | -------------- |
 | Initial draft | YYYY-MM-DD | 0.1     | Initial draft based on PRD and discussion | Architect Agent | 
+
+## 6. Spotify SDK Integration: Resilience and Error Handling
+
+### 6.1. Overview
+
+To ensure a stable and seamless user experience with the integrated Spotify player, particularly after events like system sleep or network interruptions, a robust authentication and error recovery mechanism is essential. This section outlines the architectural approach to handle Spotify SDK errors, with a focus on authentication failures.
+
+### 6.2. Core Principles
+
+*   **Proactive Re-validation:** Upon application resume (e.g., tab visibility change, system wake), proactively check and re-establish Spotify SDK connectivity if necessary, rather than waiting for an error to occur.
+*   **Reactive Re-authentication:** Implement a clear process to attempt full re-authentication when an `authentication_error` is explicitly caught from the SDK.
+*   **Comprehensive State Management:** Maintain clear internal states for the SDK's condition (e.g., `initializing`, `connected`, `disconnected`, `auth_error`, `token_refreshing`) to drive behavior and UI feedback.
+*   **User Experience:** Automate recovery processes as much as possible. Provide subtle, non-intrusive feedback to the user if re-connection takes a noticeable amount of time. Avoid unnecessary alerts for recoverable errors.
+
+### 6.3. Architectural Components and Logic
+
+1.  **Enhanced Token Management (`getSpotifyAccessToken`):**
+    *   The primary function responsible for fetching Spotify access tokens must also handle token *refresh*.
+    *   It must clearly signal success (with a valid token) or failure (e.g., returning `null` or an error object) to its callers, especially the Spotify SDK's `getOAuthToken` callback.
+
+2.  **SDK Event Listeners & Error Handling:**
+    *   **`authentication_error` Listener:**
+        *   Upon this error, the system will:
+            1.  Update internal state to reflect `auth_error`.
+            2.  Set player status to not ready/inactive.
+            3.  Log the error.
+            4.  Trigger a re-connection sequence:
+                *   Attempt a clean `player.disconnect()`.
+                *   After a brief delay, invoke the main `connect()` function to re-initialize the player and obtain a fresh token.
+    *   **Other Error Listeners (`initialization_error`, `account_error`, `playback_error`):** These will set appropriate error states and log details. Retry mechanisms may be implemented on a case-by-case basis.
+    *   **`player_state_changed` Listener:** Reliably updates player active status and current track information. A `null` state indicates inactivity.
+    *   **`ready` / `not_ready` Listeners:** Update device ID and player readiness status.
+
+3.  **Smart `connect()` Function:**
+    *   Designed to be idempotent (safe to call multiple times).
+    *   Checks for existing error states or improper initialization before attempting to connect or re-initialize the SDK.
+    *   If re-establishing connection after an `auth_error`, it may involve a full re-instantiation of the `Spotify.Player` object.
+
+4.  **Proactive Health Checks:**
+    *   Utilize the browser's Page Visibility API (`document.visibilityState`). When the application tab becomes visible:
+        *   Check current player status (`isReady`, `isActive`).
+        *   If disconnected or an `auth_error` was previously flagged, proactively trigger the `connect()` function.
+    *   Listen to browser online/offline events to trigger connection status checks.
+
+### 6.4. Conceptual Re-authentication Flow
+
+```mermaid
+graph TD
+    subgraph Error/Event Trigger
+        WakeFromSleep[System Wake / Tab Visible] --> ProactiveCheck{Player OK?}
+        SdkError[SDK emits authentication_error] --> AuthErrorPath
+    end
+
+    subgraph Recovery Path
+        ProactiveCheck -- No --> AttemptReconnect[Attempt Reconnect]
+        AuthErrorPath --> SetErrorState[Set auth_error state]
+        SetErrorState --> AttemptReconnect
+
+        AttemptReconnect --> SDKDisconnect[Call player.disconnect()]
+        SDKDisconnect --> BriefDelay[Short Delay]
+        BriefDelay --> SDKConnect[Call main connect() function]
+        SDKConnect -- Uses getOAuthToken --> TokenMgmt[Token Management]
+
+        TokenMgmt -- Success --> SDKInit[SDK Initializes/Connects]
+        TokenMgmt -- Failure --> LogAuthFailure[Log Persistent Auth Failure]
+
+        SDKInit -- Success --> PlayerReady[Player Ready & Active]
+        SDKInit -- Failure --> LogInitError[Log SDK Initialization Error]
+    end
+```
+This diagram illustrates the primary paths for re-establishing a connection after an authentication error or a proactive check. 

@@ -31,7 +31,7 @@ export function LoginForm({
         options: {
           scopes:
             'user-read-email user-read-private, streaming, user-modify-playback-state, user-read-playback-state, playlist-modify-public, user-library-read, user-library-modify, user-top-read',
-          redirectTo: `${window.location.origin}/auth/oauth?next=/rooms`,
+          redirectTo: `${window.location.origin}/auth/oauth?next=/chat`,
         },
       });
 

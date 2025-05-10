@@ -3,8 +3,7 @@
 import { useState, useTransition } from 'react';
 // Assuming the server action is at app/_actions/import-playlist.ts
 // The relative path from app/(main)/profile/ to app/_actions/ is ../../_actions/
-import { importPlaylist } from '../../_actions/import-playlist';
-import type { ImportPlaylistResult } from '../../_actions/import-playlist'; // Import the type
+import { importPlaylist, type ImportPlaylistResult } from '@/app/_actions/import-playlist';
 
 export default function PlaylistImportForm() {
   const [inputValue, setInputValue] = useState('');

@@ -1,23 +1,13 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import Script from 'next/script';
 import { Suspense } from 'react';
-import { MusicProvider } from '@/context/music-context';
-import PlayerUI from '@/components/player/player';
-// import { PlayerContextProvider } from "@/lib/contexts/player-context";
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
+import { MusicProvider } from '@/music-context/music-context';
+import PlayerTrigger from '@/components/nav/player-trigger.tsx';
+import { PageNav } from '@/components/nav/page-nav';
+import { createClient } from '@/lib/supabase/server';
 
 export const metadata: Metadata = {
   title: 'Playlist Rooms',
@@ -30,25 +20,33 @@ const cabinetGrotesk = localFont({
   display: 'swap',
 });
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const supabase = await createClient();
+  const user = await supabase.auth.getUser();
+
+  console.log('user', user);
+
   return (
     <html lang='en' suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${cabinetGrotesk.variable} antialiased flex flex-col min-h-screen bg-sidepanels`}
+        className={`${cabinetGrotesk.variable} antialiased flex flex-col min-h-screen bg-sidepanels`}
       >
-        <MusicProvider>
-          <main className='flex-grow max-w-screen-xl mx-auto w-full bg-background'>
-            <PlayerUI />
-
+        <MusicProvider isDisabled={!user.data.user}>
+          <main className='flex-grow max-w-screen-xl mx-auto w-full bg-background relative'>
+            <PageNav>
+              <PlayerTrigger />
+            </PageNav>
+            <div className='absolute top-0 left-0 w-full h-full z-10 noise' />
+            <div className='absolute top-0 left-0 w-full h-full z-10 bg-linear-[170deg,_var(--teal-dark)_25%,_oklch(from_var(--seafoam-green)_l_c_h_/_0.4)_50%,_transparent_70%,_transparent_100%]' />
             <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
           </main>
           <Toaster />
-          <Script src='https://sdk.scdn.co/spotify-player.js' strategy='afterInteractive' />
         </MusicProvider>
+        <Script src='https://sdk.scdn.co/spotify-player.js' strategy='afterInteractive' />
       </body>
     </html>
   );

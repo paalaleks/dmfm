@@ -6,12 +6,29 @@ export const useCurrentUserImage = () => {
 
   useEffect(() => {
     const fetchUserImage = async () => {
-      const { data, error } = await createClient().auth.getSession()
-      if (error) {
-        console.error(error)
+      try {
+        const { data, error } = await createClient().auth.getUser();
+        if (error) {
+          if (error.name !== 'AuthSessionMissingError') {
+            console.error(error);
+          }
+          setImage(null);
+          return;
+        }
+        setImage(data.user?.user_metadata.avatar_url ?? null);
+      } catch (err: unknown) {
+        if (
+          typeof err === 'object' &&
+          err !== null &&
+          'name' in err &&
+          (err as { name: string }).name === 'AuthSessionMissingError'
+        ) {
+          setImage(null);
+        } else {
+          console.error(err);
+          setImage(null);
+        }
       }
-
-      setImage(data.session?.user.user_metadata.avatar_url ?? null)
     }
     fetchUserImage()
   }, [])

@@ -15,9 +15,8 @@ Integrate the Spotify Web Playback SDK to allow users to control Spotify playbac
 *   **FR11:** Users must be able to navigate to the previous/next playlist from a curated or suggested list (based on taste profiles from Epic 2).
 *   **FR12:** Users must be able to save the currently playing track to their Spotify library.
 *   **FR13:** Users must be able to follow the currently playing playlist on Spotify.
-*   **FR14:** The system must handle Spotify token refresh mechanisms (implicitly handled by SDK/Supabase helpers).
+*   **FR14:** The system must handle Spotify token refresh mechanisms. 
 *   **FR15:** The system must handle Spotify track relinking.
-*   **FR16:** Users in a chat room listen to music asynchronously (i.e., their playback is independent of others).
 *   (Relies on output from Epic 2): The playlists available for navigation (FR11) should be sourced from the pool of taste-matched playlists discovered in Epic 2.
 
 ## Stories

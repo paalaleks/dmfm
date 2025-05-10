@@ -1,0 +1,115 @@
+'use server';
+
+import { createClient } from '@/lib/supabase/server';
+import { Playlist } from '@/types/spotify'; // Assuming this type exists and is appropriate
+import { calculateJaccardIndex } from '@/lib/taste-comparison'; // Assuming this utility exists
+import { getUserTopArtistIds } from '@/queries/user-profile-queries'; // Added import
+import { getCandidatePlaylists, getPlaylistArtistIds } from '@/queries/playlist-queries'; // Added getPlaylistArtistIds
+
+// Define a threshold for similarity, can be adjusted
+const SIMILARITY_THRESHOLD = 0.02; // Example: 10% similarity
+
+interface PlaylistWithTaste extends Playlist {
+  tasteProfile?: Set<string>;
+  similarityScore?: number;
+}
+
+/**
+ * Server Action to get taste-matched playlists for the current user.
+ * Fetches user's top artists, candidate playlists, profiles them,
+ * calculates taste similarity, and returns a filtered/sorted list.
+ */
+export async function getTasteMatchedPlaylistsAction(): Promise<Playlist[]> {
+  console.log('[Server Action] getTasteMatchedPlaylistsAction invoked.');
+  const supabase = await createClient();
+
+  try {
+    // 1a. Get current authenticated user's ID
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.error('[Server Action] Error fetching user or no user found:', userError);
+      // If no user, perhaps return empty or throw a specific error
+      // For now, returning empty as per AC8 for "no matches or error"
+      return [];
+    }
+    const userId = user.id;
+    console.log('[Server Action] Authenticated User ID:', userId);
+
+    // 1b. Fetch user's top artists (from user_top_artists) into a Set<string>.
+    console.log("[Server Action] Fetching user's top artists...");
+    const userTasteProfile = await getUserTopArtistIds(supabase, userId);
+
+    if (userTasteProfile.size === 0) {
+      console.log(
+        '[Server Action] User has no top artists or failed to fetch. Returning empty list.'
+      );
+      return [];
+    }
+
+    // 1c. Fetch candidate playlists (from playlists, excluding user's own)
+    console.log('[Server Action] Fetching candidate playlists...');
+    const candidatePlaylists: PlaylistWithTaste[] = await getCandidatePlaylists(supabase, userId);
+
+    if (candidatePlaylists.length === 0) {
+      console.log('[Server Action] No candidate playlists found.');
+      return [];
+    }
+
+    // 1d. For each candidate playlist, fetch its tracks and aggregate unique artist Spotify IDs.
+    // 1e. Calculate Jaccard Index.
+    console.log('[Server Action] Profiling and comparing playlists...');
+    const matchedPlaylists: PlaylistWithTaste[] = [];
+
+    console.log('[Server Action] User Taste Profile:', userTasteProfile);
+
+    for (const playlist of candidatePlaylists) {
+      // IMPORTANT: The Playlist type from '@/types/spotify' needs to have an 'id' field
+      // that corresponds to the primary key of your 'playlists' table (e.g., a UUID).
+      // If it only has spotify_id (or similar), you'll need to ensure the internal DB ID is fetched
+      // and available on the playlist object here.
+      // Assuming playlist.id is the internal database ID.
+      if (!playlist.id) {
+        console.warn(
+          `[Server Action] Playlist ${playlist.name || 'Unknown'} is missing an internal ID. Skipping.`
+        );
+        continue;
+      }
+
+      const playlistArtistSet = await getPlaylistArtistIds(supabase, playlist.id);
+      playlist.tasteProfile = playlistArtistSet;
+      // Ensure calculateJaccardIndex is ready to be used.
+      // It might not be implemented yet if '@/lib/taste-comparison' is still a placeholder.
+      playlist.similarityScore = calculateJaccardIndex(userTasteProfile, playlistArtistSet);
+
+      console.log(
+        `[Server Action] Processing Playlist: "${playlist.name}", Spotify ID: ${playlist.spotify_id}, Internal ID: ${playlist.id}, Artists Found: ${playlistArtistSet.size}, Calculated Score: ${playlist.similarityScore}`
+      );
+      console.log('[Server Action] Playlist Artist Set:', playlistArtistSet);
+
+      if (playlist.similarityScore >= SIMILARITY_THRESHOLD) {
+        matchedPlaylists.push(playlist);
+      }
+    }
+
+    // 1f. Filter playlists by a similarity threshold and sort them by score.
+    // Filtering is done above. Now sort.
+    matchedPlaylists.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
+    console.log(
+      `[Server Action] Found ${matchedPlaylists.length} matched playlists after filtering and sorting.`
+    );
+
+    // 1g. Return the final list of Playlist objects.
+    // Need to strip tasteProfile and similarityScore if Playlist type doesn't include them.
+    // For now, assuming Playlist type is flexible or we'll map it.
+    return matchedPlaylists as Playlist[]; // Casting for now, ensure types match
+  } catch (error) {
+    console.error('[Server Action] Unexpected error in getTasteMatchedPlaylistsAction:', error);
+    // AC9: Robust error handling
+    // Depending on desired behavior, could throw error or return empty array
+    return []; // Return empty on error as per AC8 behavior
+  }
+}

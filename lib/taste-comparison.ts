@@ -1,37 +1,40 @@
 // Utility functions for comparing user music taste
-import { createClient } from '@/lib/supabase/server'; // Using server client as this might be called from actions/server components
+import { createClient } from '@/lib/supabase/client'; // Using server client as this might be called from actions/server components
 
 /**
  * Calculates the Jaccard Index between two sets of strings.
- * Jaccard Index = |Intersection(A, B)| / |Union(A, B)|
- * @param setA - The first set of strings (e.g., artist IDs).
+ * The Jaccard Index is a measure of similarity between two sets,
+ * defined as the size of the intersection divided by the size of the union.
+ *
+ * @param setA - The first set of strings.
  * @param setB - The second set of strings.
- * @returns The Jaccard Index similarity score (0 to 1).
+ * @returns The Jaccard Index as a number between 0 and 1.
+ * Returns 0 if both sets are empty or if an error occurs.
  */
 export function calculateJaccardIndex(setA: Set<string>, setB: Set<string>): number {
-  // Handle edge case: If either set is empty, similarity is 0
-  if (setA.size === 0 || setB.size === 0) {
+  if (!setA || !setB) {
+    // console.warn('[taste-comparison] One or both sets are null/undefined.');
     return 0;
   }
 
-  // Calculate Intersection
   const intersection = new Set<string>();
-  for (const item of setA) {
+  setA.forEach((item) => {
     if (setB.has(item)) {
       intersection.add(item);
     }
+  });
+
+  const union = new Set<string>([...setA, ...setB]);
+
+  if (union.size === 0) {
+    // This case handles if both setA and setB are empty.
+    // console.log('[taste-comparison] Union of sets is empty (both sets likely empty).');
+    return 0; // Or 1 if empty sets are considered perfectly similar, Jaccard is typically 0.
   }
-  const intersectionSize = intersection.size;
 
-  // Calculate Union size efficiently: |A U B| = |A| + |B| - |A ∩ B|
-  const unionSize = setA.size + setB.size - intersectionSize;
-
-  if (unionSize === 0) {
-    return 0; // Should only happen if both sets were empty, already handled, but safe
-  }
-
-  const similarity = intersectionSize / unionSize;
-  return similarity;
+  const score = intersection.size / union.size;
+  // console.log(`[taste-comparison] Intersection: ${intersection.size}, Union: ${union.size}, Score: ${score}`);
+  return score;
 }
 
 /**

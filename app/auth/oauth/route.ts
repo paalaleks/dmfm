@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 // The client you created from the Server-Side Auth instructions
 import { createClient } from "@/lib/supabase/server";
 import { fetchAndStoreUserTopItems } from '@/app/_actions/top-items';
+import { User } from '@supabase/supabase-js';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -11,37 +12,59 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { data: sessionData, error } = await supabase.auth.exchangeCodeForSession(code);
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
-    if (!error) {
-      if (sessionData?.session?.user) {
-        console.log(
-          `[OAuth Callback] User ${sessionData.session.user.id} authenticated. Triggering fetchAndStoreUserTopItems...`
-        );
-        try {
-          const topItemsResult = await fetchAndStoreUserTopItems();
-          if (topItemsResult.success) {
-            console.log(
-              `[OAuth Callback] fetchAndStoreUserTopItems SUCCEEDED for user ${sessionData.session.user.id}:`,
-              topItemsResult.message,
-              topItemsResult.data
-            );
-          } else {
-            console.error(
-              `[OAuth Callback] fetchAndStoreUserTopItems FAILED for user ${sessionData.session.user.id}:`,
-              topItemsResult.error
-            );
-          }
-        } catch (actionError) {
-          console.error(
-            `[OAuth Callback] Exception calling fetchAndStoreUserTopItems for user ${sessionData.session.user.id}:`,
-            actionError
-          );
-        }
-      } else {
+    if (!exchangeError) {
+      // Code exchange successful, now get the session to access provider tokens
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError || !sessionData.session) {
+        console.error('OAuth callback: Error getting session after code exchange:', sessionError);
+        // Redirect to error page or handle differently
+        return NextResponse.redirect(`${origin}/auth/error?message=session-fetch-failed`);
+      }
+
+      const session = sessionData.session;
+      console.log(
+        'OAuth callback: Session obtained after exchange:',
+        JSON.stringify(session, null, 2)
+      );
+
+      // Extract provider tokens from the session
+      const providerToken = session.provider_token;
+      const providerRefreshToken = session.provider_refresh_token;
+      const providerExpiresAt = session.expires_at; // Spotify uses expires_at
+
+      if (!providerToken || !providerRefreshToken) {
         console.warn(
-          '[OAuth Callback] Session established, but user data is not immediately available in exchangeCodeForSession response to trigger top items fetch.'
+          'OAuth callback: Provider tokens not found in session after exchange. Scopes might be missing or login flow issue.'
         );
+        // Proceed with redirect, but SDK might fail later
+      } else {
+        console.log('OAuth callback: Provider tokens found, attempting to save to user_metadata.');
+        // Save tokens to user_metadata
+        const { data, error: updateError } = await supabase.auth.updateUser({
+          data: {
+            provider_token: providerToken,
+            provider_refresh_token: providerRefreshToken,
+            provider_token_expires_at: providerExpiresAt, // Store expiry too
+            // Add any other metadata you want to persist here
+          },
+        });
+
+        if (data.user || !updateError) {
+          await fetchAndStoreUserTopItems(data.user as User);
+        }
+
+        if (updateError) {
+          console.error(
+            'OAuth callback: Error updating user metadata with provider tokens:',
+            updateError
+          );
+        } else {
+          console.log('OAuth callback: Successfully saved provider tokens to user_metadata.');
+        }
       }
 
       const forwardedHost = request.headers.get('x-forwarded-host'); // original origin before load balancer
@@ -54,6 +77,8 @@ export async function GET(request: Request) {
       } else {
         return NextResponse.redirect(`${origin}${next}`);
       }
+    } else {
+      console.error('OAuth callback: Error exchanging code for session:', exchangeError);
     }
   }
 

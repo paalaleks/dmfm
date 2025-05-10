@@ -348,16 +348,13 @@ export function useRealtimeChat({
           filter: `room_id=eq.${roomName}`,
         },
         (payload) => {
-          console.log('Postgres change received:', payload);
+        
           if (payload.eventType === 'UPDATE') {
             const updatedRecord = payload.new as Tables<'chat_messages'>;
-            console.log(
-              `[Realtime UPDATE] Received for ID: ${updatedRecord.id} (Type: ${typeof updatedRecord.id})`
-            );
+
             setMessages((currentMessages) =>
               currentMessages.map((msg) => {
                 if (msg.id === updatedRecord.id) {
-                  console.log(`[Realtime UPDATE] Matched message in state: ID=${msg.id}`);
                   return {
                     ...msg,
                     id: updatedRecord.id,
@@ -372,12 +369,10 @@ export function useRealtimeChat({
               })
             );
           } else if (payload.eventType === 'DELETE') {
-            console.log('DELETE event received. Payload.old:', JSON.stringify(payload.old));
             const deletedRecord = payload.old as Partial<
               Tables<'chat_messages'> & { id: number | string }
             >;
             if (deletedRecord && typeof deletedRecord.id !== 'undefined') {
-              console.log('Attempting to delete message with ID from Realtime:', deletedRecord.id);
               setMessages((currentMessages) =>
                 currentMessages.filter((msg) => {
                   console.log(
@@ -393,7 +388,6 @@ export function useRealtimeChat({
               );
             }
           } else if (payload.eventType === 'INSERT') {
-            console.log('Postgres INSERT event received:', payload.new);
             // This INSERT handler is now primarily a fallback or for external insertions.
             // Optimistic messages should be confirmed via EVENT_MESSAGE_CONFIRMED broadcast.
             const dbRecord = payload.new as Tables<'chat_messages'> & {
@@ -475,9 +469,6 @@ export function useRealtimeChat({
         }
       )
       .subscribe((status, err) => {
-        console.log(
-          `[${new Date().toISOString()}] DB Changes Channel status: ${status} for room ${roomName}. Initial messages length: ${messages.length}`
-        );
         if (status !== 'SUBSCRIBED' && err) {
           console.error(`DB Changes Channel error object for room ${roomName}:`, err);
         } else if (status !== 'SUBSCRIBED') {

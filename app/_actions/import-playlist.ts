@@ -1,6 +1,6 @@
 'use server';
 
-import { getSpotifyAccessToken } from '@/lib/spotify-api';
+import { getSpotifyAccessToken } from '@/lib/spotify-accesstoken';
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server';
 
 // Define a basic structure for expected Spotify Playlist object
@@ -73,20 +73,18 @@ interface DbPlaylistInsert {
   submitted_by_user_id?: string | null;
 }
 
-// For storing playlist items
-interface DbPlaylistItemInsert {
-  db_playlist_id: string; // FK to our playlists.id
-  spotify_track_id: string;
+// For storing playlist items - REVISED for playlist_tracks table
+interface DbPlaylistTrackInsert {
+  playlist_id: string; // FK to our playlists.id (UUID)
+  track_spotify_id: string;
   track_name: string;
-  artists_json: object[] | null;
-  album_name: string;
-  album_spotify_id: string;
-  album_images_json: object[] | null;
-  duration_ms: number;
-  explicit: boolean;
-  preview_url?: string | null;
-  spotify_uri?: string | null;
-  added_at: string;
+  track_artists: { spotify_id: string; name: string }[] | null; // JSONB
+  album_name: string | null;
+  album_art_url: string | null;
+  duration_ms: number | null;
+  order_in_playlist: number; // 0-based index
+  track_preview_url?: string | null;
+  added_at: string | null; // Spotify's added_at timestamp
 }
 
 // Updated ImportPlaylistResult
@@ -105,6 +103,9 @@ export interface ImportPlaylistResult {
   spotifyPlaylistData?: SpotifyPlaylist; // Raw from Spotify
   spotifyTracksData?: SpotifyPlaylistItem[]; // Raw from Spotify
 }
+
+// Helper function for introducing a delay
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function importPlaylist(playlistSpotifyId: string): Promise<ImportPlaylistResult> {
   console.log(`Attempting to import playlist: ${playlistSpotifyId}`);
@@ -208,12 +209,23 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
 
     // 4. Fetch Playlist Tracks from Spotify for the new playlist
     let allSpotifyTracks: SpotifyPlaylistItem[] = [];
-    let tracksUrl: string | null = spotifyPlaylist.tracks.href;
-    if (!tracksUrl || !tracksUrl.startsWith('https')) {
-      tracksUrl = `https://api.spotify.com/v1/playlists/${playlistSpotifyId}/tracks?fields=items(added_at,track(id,name,artists(id,name),album(id,name,images),duration_ms,explicit,preview_url,uri)),next,total`;
+    let tracksUrl: string | null = null; // Initialize as null
+
+    // Only attempt to fetch tracks if the playlist metadata indicates tracks exist.
+    if (spotifyPlaylist.tracks && spotifyPlaylist.tracks.total > 0) {
+      // Always construct the initial URL for fetching tracks with the correct item-specific fields.
+      // Using limit=100 for efficiency, as it's the typical maximum for this endpoint.
+      tracksUrl = `https://api.spotify.com/v1/playlists/${playlistSpotifyId}/tracks?offset=0&limit=100&fields=items(added_at,track(id,name,artists(id,name),album(id,name,images),duration_ms,explicit,preview_url,uri)),next,total`;
+      console.log(`[importPlaylist] Constructed initial tracksUrl: ${tracksUrl}`);
+    } else {
+      console.log(
+        `[importPlaylist] Playlist ${spotifyPlaylist.name} has 0 tracks according to metadata. Skipping track fetch.`
+      );
+      // If there are no tracks, we can consider the import successful at this point with 0 tracks.
     }
 
     while (tracksUrl) {
+      console.log(`[importPlaylist] Fetching tracks page from URL: ${tracksUrl}`);
       const tracksResponse = await fetch(tracksUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -224,7 +236,7 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
           success: true,
           status: 'error_fetching_tracks',
           playlistIdDb: newDbPlaylistId,
-          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but failed to fetch a page of tracks: ${tracksResponse.status} - ${errorBody?.error?.message || tracksResponse.statusText}`,
+          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but failed to fetch a page of tracks: ${tracksResponse.status} - ${errorBody?.error?.message || tracksResponse.statusText} from URL: ${tracksUrl}`,
           spotifyPlaylistData: spotifyPlaylist,
           spotifyTracksData: allSpotifyTracks, // Tracks fetched so far
         };
@@ -233,6 +245,10 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
       let tracksPageData;
       try {
         tracksPageData = await tracksResponse.json();
+        console.log(
+          '[importPlaylist] Raw tracksPageData received from Spotify:',
+          JSON.stringify(tracksPageData, null, 2)
+        );
       } catch (jsonError: unknown) {
         const errorMessage = jsonError instanceof Error ? jsonError.message : String(jsonError);
         console.error(
@@ -248,7 +264,7 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
           success: true,
           status: 'error_fetching_tracks',
           playlistIdDb: newDbPlaylistId,
-          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but failed to parse JSON for a page of tracks. Error: ${errorMessage}`,
+          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but failed to parse JSON for a page of tracks from URL ${tracksUrl}. Error: ${errorMessage}`,
           spotifyPlaylistData: spotifyPlaylist,
           spotifyTracksData: allSpotifyTracks,
         };
@@ -256,17 +272,22 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
 
       const tracksPage = tracksPageData as SpotifyPlaylistTracksResponse;
 
-      if (!tracksPage || !Array.isArray(tracksPage.items)) {
+      if (!tracksPage || typeof tracksPage !== 'object' || !Array.isArray(tracksPage.items)) {
         console.warn(
-          "Spotify tracks page data is malformed or 'items' field is missing or not an array.",
-          'Received data for tracks page:',
-          tracksPage
+          "[importPlaylist] Spotify tracks page data is malformed. 'tracksPage' is not an object or 'tracksPage.items' field is missing or not an array.",
+          'URL fetched:',
+          tracksUrl,
+          'Type of tracksPage:',
+          typeof tracksPage,
+          'Is tracksPage.items an array?:',
+          Array.isArray(tracksPage?.items),
+          'Received data for tracks page (logged above as Raw tracksPageData received from Spotify):'
         );
         return {
           success: true,
           status: 'error_fetching_tracks',
           playlistIdDb: newDbPlaylistId,
-          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but Spotify returned malformed data for a page of tracks. Track import may be incomplete.`,
+          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but Spotify returned malformed data for a page of tracks from URL ${tracksUrl}. Track import may be incomplete.`,
           spotifyPlaylistData: spotifyPlaylist,
           spotifyTracksData: allSpotifyTracks,
         };
@@ -276,13 +297,17 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
         tracksPage.items.filter((item) => item && item.track !== null)
       );
 
+      // Check for next page and introduce a delay if needed
       if (tracksPage && typeof tracksPage.next === 'string') {
         tracksUrl = tracksPage.next;
+        // Add a small delay to be kind to the API when paginating
+        console.log('[importPlaylist] Delaying before fetching next page of tracks...');
+        await sleep(300); // 300ms delay
       } else if (tracksPage && tracksPage.next === null) {
         tracksUrl = null; // End of pages
       } else {
         console.warn(
-          "Unexpected 'next' field in Spotify tracks response or tracksPage is undefined. Stopping pagination. Received 'next' value:",
+          "[importPlaylist] Unexpected 'next' field in Spotify tracks response or tracksPage is undefined. Stopping pagination. Received 'next' value:",
           tracksPage ? tracksPage.next : 'tracksPage was falsy'
         );
         tracksUrl = null; // Stop pagination if 'next' is not a string or null
@@ -298,42 +323,56 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
 
     // 5. Map and Insert Playlist Items into DB
     if (allSpotifyTracks.length > 0) {
-      const playlistItemsToInsert: DbPlaylistItemInsert[] = allSpotifyTracks.map((item) => ({
-        db_playlist_id: newDbPlaylistId,
-        spotify_track_id: item.track!.id, // item.track is not null due to filter
-        track_name: item.track!.name,
-        artists_json: item.track!.artists.map((a) => ({ id: a.id, name: a.name })),
-        album_name: item.track!.album.name,
-        album_spotify_id: item.track!.album.id,
-        album_images_json: item.track!.album.images.map((img) => ({
-          url: img.url,
-          height: img.height,
-          width: img.width,
-        })),
-        duration_ms: item.track!.duration_ms,
-        explicit: item.track!.explicit,
-        preview_url: item.track!.preview_url,
-        spotify_uri: item.track!.uri,
-        added_at: item.added_at,
-      }));
+      const playlistTracksToInsert: DbPlaylistTrackInsert[] = allSpotifyTracks
+        .map((item, index) => {
+          if (!item.track) {
+            // This case should ideally be filtered out earlier, but as a safeguard:
+            console.warn('Skipping item with null track data during mapping:', item);
+            return null; // Will be filtered out later
+          }
+          const track = item.track;
+          return {
+            playlist_id: newDbPlaylistId,
+            track_spotify_id: track.id,
+            track_name: track.name,
+            track_artists: track.artists.map((a) => ({
+              spotify_id: a.id, // Ensure this matches expected JSONB structure
+              name: a.name,
+            })),
+            album_name: track.album ? track.album.name : null,
+            album_art_url:
+              track.album && track.album.images && track.album.images.length > 0
+                ? track.album.images[0].url
+                : null,
+            duration_ms: track.duration_ms,
+            order_in_playlist: index, // Using the index in the fetched array
+            track_preview_url: track.preview_url,
+            added_at: item.added_at,
+            // Note: 'track_popularity' and 'audio_features' are not included
+            // as they are not in the current Spotify track fetch or DbPlaylistTrackInsert
+          };
+        })
+        .filter(Boolean) as DbPlaylistTrackInsert[]; // Filter out any nulls if items with null tracks were encountered
 
-      const { error: insertTracksError } = await supabase
-        .from('playlist_items')
-        .insert(playlistItemsToInsert);
+      if (playlistTracksToInsert.length > 0) {
+        const { error: insertTracksError } = await supabase
+          .from('playlist_tracks') // CORRECTED TABLE NAME
+          .insert(playlistTracksToInsert);
 
-      if (insertTracksError) {
-        return {
-          success: true, // Metadata saved, tracks partially/failed to save
-          status: 'error_saving_tracks',
-          playlistIdDb: newDbPlaylistId,
-          message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but failed to save tracks: ${insertTracksError.message}`,
-          spotifyPlaylistData: spotifyPlaylist,
-          spotifyTracksData: allSpotifyTracks,
-        };
+        if (insertTracksError) {
+          return {
+            success: true,
+            status: 'error_saving_tracks',
+            playlistIdDb: newDbPlaylistId,
+            message: `Playlist metadata saved (ID: ${newDbPlaylistId}), but failed to save tracks: ${insertTracksError.message}`,
+            spotifyPlaylistData: spotifyPlaylist,
+            spotifyTracksData: allSpotifyTracks,
+          };
+        }
+        console.log(
+          `Successfully saved ${allSpotifyTracks.length} tracks to DB for playlist ID: ${newDbPlaylistId}`
+        );
       }
-      console.log(
-        `Successfully saved ${allSpotifyTracks.length} tracks to DB for playlist ID: ${newDbPlaylistId}`
-      );
     }
 
     return {
