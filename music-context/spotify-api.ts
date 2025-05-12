@@ -2,13 +2,13 @@ import { SpotifyApiTrackFull, Playlist } from '../types/spotify';
 import { getValidSpotifyToken } from './user-session'; // Import for token refresh
 
 // Generic Spotify API Call Helper
-export const makeSpotifyApiCall = async (
+export const makeSpotifyApiCall = async <T = unknown>(
   token: string,
   endpoint: string,
   method: string = 'GET',
   body?: unknown,
   isRetry: boolean = false // Added to prevent infinite refresh loops
-): Promise<unknown> => {
+): Promise<T> => {
   if (!token && !isRetry) {
     // Allow retry even if initial token was null, getValidSpotifyToken will handle it
     // If it's a retry and token is still null, getValidSpotifyToken would have been called by the first attempt
@@ -74,7 +74,7 @@ export const makeSpotifyApiCall = async (
   }
 
   if (response.status === 204) {
-    return null;
+    return null as T;
   }
 
   const contentType = response.headers.get('Content-Type');
@@ -85,10 +85,10 @@ export const makeSpotifyApiCall = async (
       console.warn(
         `Spotify API: Endpoint ${endpoint} (status ${response.status}) declared Content-Type: application/json but Content-Length: 0. Treating as empty response.`
       );
-      return null;
+      return null as T;
     }
     try {
-      return await response.json();
+      return (await response.json()) as T;
     } catch (parseError) {
       const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
       console.error(
@@ -101,7 +101,7 @@ export const makeSpotifyApiCall = async (
   }
 
   if (contentLengthHeader === '0') {
-    return null;
+    return null as T;
   }
 
   if (method === 'PUT' || method === 'DELETE' || method === 'PATCH') {
@@ -111,7 +111,7 @@ export const makeSpotifyApiCall = async (
         `returned non-JSON, non-empty content (Content-Type: ${contentType || 'N/A'}, Body: "${textBody.substring(0, 50)}..."). ` +
         `This might be unexpected. For now, treating as success with no parseable body and returning null.`
     );
-    return null;
+    return null as T;
   }
 
   const responseText = await response.text();
@@ -196,21 +196,24 @@ export const unsaveTrackAPI = async (token: string, trackId: string): Promise<vo
 
 export const checkIfPlaylistIsFollowedAPI = async (
   token: string,
-  playlistId: string,
-  userSpotifyId: string
+  playlistId: string
 ): Promise<boolean | null> => {
-  if (!token || !playlistId || !userSpotifyId) {
+  if (!token || !playlistId) {
+    console.warn('[Spotify API] Missing token or playlistId for checkIfPlaylistIsFollowedAPI');
     return null;
   }
   try {
     const result = (await makeSpotifyApiCall(
       token,
-      `/playlists/${playlistId}/followers/contains?ids=${userSpotifyId}`
+      `/playlists/${playlistId}/followers/contains`
     )) as boolean[];
-    if (Array.isArray(result) && typeof result[0] === 'boolean') {
+    if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'boolean') {
       return result[0];
     }
-    console.warn('[checkIfPlaylistIsFollowedAPI] Unexpected response format:', result);
+    console.warn(
+      '[checkIfPlaylistIsFollowedAPI] Unexpected response format or empty array:',
+      result
+    );
     return null;
   } catch (err) {
     console.error('[checkIfPlaylistIsFollowedAPI] Error:', err);
@@ -264,6 +267,12 @@ export const toggleShuffleAPI = async (
   }
 };
 
+// Helper interface for the structure of items from /playlists/{id}/tracks
+interface SpotifyPlaylistTrackItem {
+  track: SpotifyApiTrackFull | null; // Track can be null if it's unavailable but still in playlist
+  is_local: boolean;
+}
+
 export const playPlaylistAPI = async (
   token: string,
   deviceId: string,
@@ -275,20 +284,182 @@ export const playPlaylistAPI = async (
   }
 
   const contextUri = `spotify:playlist:${playlist.spotify_id}`;
-  const body: { context_uri: string; offset?: { position: number } } = {
+  const validTrackIndex = Math.max(0, Math.floor(trackIndex || 0));
+  const initialPlayBody = {
     context_uri: contextUri,
+    offset: { position: validTrackIndex },
   };
 
-  const validTrackIndex = Math.max(0, Math.floor(trackIndex || 0));
-  if (validTrackIndex >= 0) {
-    body.offset = { position: validTrackIndex };
-  }
-
   try {
-    await makeSpotifyApiCall(token, `/me/player/play?device_id=${deviceId}`, 'PUT', body);
-  } catch (err) {
-    // Specific error handling for 403 can be done here or re-thrown for context
-    console.error('[playPlaylistAPI] Error starting playlist:', err);
-    throw err;
+    await makeSpotifyApiCall(
+      token,
+      `/me/player/play?device_id=${deviceId}`,
+      'PUT',
+      initialPlayBody
+    );
+    console.log(
+      `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) at index ${validTrackIndex}.`
+    );
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (
+      errorMessage &&
+      errorMessage.includes('Spotify API Error (403)') &&
+      errorMessage.includes('Restriction violated')
+    ) {
+      console.warn(
+        `[playPlaylistAPI] Initial attempt for playlist "${playlist.name}" (ID: ${playlist.spotify_id}) at index ${validTrackIndex} failed due to restriction. Attempting fallback...`
+      );
+
+      try {
+        const tracksResponse = await makeSpotifyApiCall<{ items: SpotifyPlaylistTrackItem[] }>(
+          token,
+          `/playlists/${playlist.spotify_id}/tracks?fields=items(track(id,uri,name,type,is_playable,restrictions),is_local)&limit=50&offset=${validTrackIndex}&market=from_token`,
+          'GET'
+        );
+
+        const evaluatedTracksDetails: Array<{
+          name: string | undefined;
+          uri: string | undefined;
+          is_playable: boolean | undefined;
+          restrictions: SpotifyApiTrackFull['restrictions'];
+          reasonSkipped: string;
+        }> = [];
+
+        if (tracksResponse && tracksResponse.items) {
+          for (const item of tracksResponse.items) {
+            let reasonSkippedInitialCheck = 'Unknown reason';
+
+            if (item.is_local || !item.track || item.track.type !== 'track') {
+              reasonSkippedInitialCheck = 'Non-track, local, or null track item';
+              evaluatedTracksDetails.push({
+                name: item.track?.name,
+                uri: item.track?.uri,
+                is_playable: item.track?.is_playable,
+                restrictions: item.track?.restrictions,
+                reasonSkipped: reasonSkippedInitialCheck,
+              });
+              console.log(
+                `[playPlaylistAPI] Fallback: Skipping (initial check) - ${reasonSkippedInitialCheck}: URI ${item.track?.uri || 'N/A'}, Name: ${item.track?.name || 'N/A'}`
+              );
+              continue;
+            }
+
+            const currentTrack = item.track;
+            console.log(
+              `[playPlaylistAPI] Fallback: Evaluating track URI: ${currentTrack.uri}, Name: "${currentTrack.name}", is_playable: ${currentTrack.is_playable}, restrictions: ${JSON.stringify(currentTrack.restrictions)}`
+            );
+
+            let passesInitialFilter = true;
+            let filterSkipReason = 'Passed initial playability filter';
+
+            if (currentTrack.is_playable === false) {
+              passesInitialFilter = false;
+              filterSkipReason = 'Track explicitly marked as not playable (is_playable: false)';
+            } else if (
+              currentTrack.restrictions &&
+              (currentTrack.restrictions.reason === 'market' ||
+                currentTrack.restrictions.reason === 'product' ||
+                currentTrack.restrictions.reason === 'payment_required')
+            ) {
+              passesInitialFilter = false;
+              filterSkipReason = `Track has prohibitive restrictions (reason: ${currentTrack.restrictions.reason})`;
+            }
+
+            if (!passesInitialFilter) {
+              evaluatedTracksDetails.push({
+                name: currentTrack.name,
+                uri: currentTrack.uri,
+                is_playable: currentTrack.is_playable,
+                restrictions: currentTrack.restrictions,
+                reasonSkipped: filterSkipReason,
+              });
+              console.log(
+                `[playPlaylistAPI] Fallback: -> Skipping track "${currentTrack.name}" after initial filter. Reason: ${filterSkipReason}`
+              );
+              continue;
+            }
+
+            // If we reach here, the track is a candidate. Attempt to play it directly to confirm it is truly playable.
+            console.log(
+              `[playPlaylistAPI] Fallback: -> Candidate track URI: ${currentTrack.uri}, Name: "${currentTrack.name}". Attempting direct play test...`
+            );
+            try {
+              // Perform a silent play test (optional, could be removed if causing issues or if next step is enough)
+              // For a true test, one might need to briefly play and pause, or just trust the next call.
+              // Let's assume for now the next call is the primary goal.
+
+              // Now, try to play it using the original context_uri but with the new offset
+              const actualTrackIndexInPlaylist =
+                validTrackIndex + tracksResponse.items.indexOf(item);
+              // indexOf(item) should give the index of the current item in the tracksResponse.items array.
+
+              console.log(
+                `[playPlaylistAPI] Fallback: Candidate "${currentTrack.name}" seems viable. Attempting to play original playlist context at new index: ${actualTrackIndexInPlaylist}.`
+              );
+              await makeSpotifyApiCall(token, `/me/player/play?device_id=${deviceId}`, 'PUT', {
+                context_uri: contextUri,
+                offset: { position: actualTrackIndexInPlaylist },
+              });
+              console.log(
+                `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) with fallback using context_uri at index ${actualTrackIndexInPlaylist} (Track: "${currentTrack.name}")`
+              );
+              return; // SUCCESS!
+            } catch (contextPlayError: unknown) {
+              const contextPlayErrorMessage =
+                contextPlayError instanceof Error
+                  ? contextPlayError.message
+                  : String(contextPlayError);
+              let reasonForThisAttemptFailure = `Context play attempt for ${currentTrack.uri} at index ${validTrackIndex + tracksResponse.items.indexOf(item)} failed: ${contextPlayErrorMessage}`;
+
+              if (
+                contextPlayErrorMessage.includes('Spotify API Error (403)') &&
+                contextPlayErrorMessage.includes('Restriction violated')
+              ) {
+                reasonForThisAttemptFailure = `Context play attempt for ${currentTrack.uri} (at index ${validTrackIndex + tracksResponse.items.indexOf(item)}) failed with 403 Restriction Violated.`;
+                console.warn(
+                  `[playPlaylistAPI] Fallback: Context play for track URI ${currentTrack.uri} ("${currentTrack.name}") at new index failed with 403. Trying next track. Error: ${contextPlayErrorMessage}`
+                );
+              } else {
+                console.error(
+                  `[playPlaylistAPI] Fallback: Context play for track URI ${currentTrack.uri} ("${currentTrack.name}") at new index failed with non-403 error. Trying next track. Error: ${contextPlayErrorMessage}`
+                );
+              }
+              evaluatedTracksDetails.push({
+                name: currentTrack.name,
+                uri: currentTrack.uri,
+                is_playable: currentTrack.is_playable,
+                restrictions: currentTrack.restrictions,
+                reasonSkipped: reasonForThisAttemptFailure,
+              });
+              // Continue to the next track in the loop
+            }
+          }
+        }
+
+        // If loop completes without returning, no track was successfully played
+        console.error(
+          `[playPlaylistAPI] Fallback failed for playlist "${playlist.name}" (ID: ${playlist.spotify_id}). No playable tracks found after trying all candidates with context. Details of evaluated tracks (up to 50):`,
+          JSON.stringify(evaluatedTracksDetails, null, 2)
+        );
+        const noPlayableMsg = `Failed to play playlist "${playlist.name}" (ID: ${playlist.spotify_id}). No playable tracks found starting from index ${validTrackIndex} after initial restriction. See console for details on evaluated tracks.`;
+        throw new Error(noPlayableMsg);
+      } catch (fallbackError: unknown) {
+        console.error(
+          `[playPlaylistAPI] Error during fallback attempt for playlist "${playlist.name}" (ID: ${playlist.spotify_id}):`,
+          fallbackError
+        );
+        // Re-throw the original error, as the fallback also failed.
+        // Or, you could throw fallbackError if it's more informative.
+        throw error;
+      }
+    } else {
+      // Not the specific 403 restriction error, or some other error in the initial attempt
+      console.error(
+        `[playPlaylistAPI] Error starting playlist "${playlist.name}" (ID: ${playlist.spotify_id}):`,
+        error
+      );
+      throw error;
+    }
   }
 };

@@ -205,77 +205,7 @@ export type Database = {
         };
         Relationships: [];
       };
-      user_playlist_interactions: {
-        Row: {
-          id: number;
-          interacted_at: string;
-          interaction_type: string;
-          metadata: Json | null;
-          playlist_id: string;
-          user_id: string;
-        };
-        Insert: {
-          id?: number;
-          interacted_at?: string;
-          interaction_type: string;
-          metadata?: Json | null;
-          playlist_id: string;
-          user_id: string;
-        };
-        Update: {
-          id?: number;
-          interacted_at?: string;
-          interaction_type?: string;
-          metadata?: Json | null;
-          playlist_id?: string;
-          user_id?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'user_playlist_interactions_playlist_id_fkey';
-            columns: ['playlist_id'];
-            isOneToOne: false;
-            referencedRelation: 'playlists';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'user_playlist_interactions_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'profiles';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      user_taste_profiles: {
-        Row: {
-          last_updated: string;
-          top_artist_ids: string[] | null;
-          top_track_ids: string[] | null;
-          user_id: string;
-        };
-        Insert: {
-          last_updated?: string;
-          top_artist_ids?: string[] | null;
-          top_track_ids?: string[] | null;
-          user_id: string;
-        };
-        Update: {
-          last_updated?: string;
-          top_artist_ids?: string[] | null;
-          top_track_ids?: string[] | null;
-          user_id?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'user_taste_profiles_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: true;
-            referencedRelation: 'profiles';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
+
       user_top_artists: {
         Row: {
           artist_spotify_id: string;

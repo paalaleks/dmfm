@@ -97,7 +97,8 @@ export interface ImportPlaylistResult {
     | 'error_fetching_meta'
     | 'error_fetching_tracks'
     | 'error_saving_meta'
-    | 'error_saving_tracks';
+    | 'error_saving_tracks'
+    | 'error_aggregating_data'; // Added for aggregation step
   playlistIdDb?: string; // Our internal DB playlist ID
   message?: string;
   spotifyPlaylistData?: SpotifyPlaylist; // Raw from Spotify
@@ -375,6 +376,87 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
       }
     }
 
+    // --- BEGIN AGGREGATION LOGIC FOR Story 8.2 ---
+    console.log(`[Story 8.2] Starting aggregation for playlist ID: ${newDbPlaylistId}`);
+    try {
+      const tracks_json: { spotify_track_id: string; name: string; duration_ms: number }[] =
+        allSpotifyTracks
+          .map((item) => {
+            if (!item.track) return null;
+            return {
+              spotify_track_id: item.track.id,
+              name: item.track.name,
+              duration_ms: item.track.duration_ms,
+            };
+          })
+          .filter(Boolean) as { spotify_track_id: string; name: string; duration_ms: number }[];
+
+      const artistOccurrencesMap = new Map<
+        string,
+        { spotify_artist_id: string; name: string; playlist_occurrences: number }
+      >();
+      allSpotifyTracks.forEach((item) => {
+        if (item.track && item.track.artists) {
+          item.track.artists.forEach((artist) => {
+            if (artistOccurrencesMap.has(artist.id)) {
+              artistOccurrencesMap.get(artist.id)!.playlist_occurrences++;
+            } else {
+              artistOccurrencesMap.set(artist.id, {
+                spotify_artist_id: artist.id,
+                name: artist.name,
+                playlist_occurrences: 1,
+              });
+            }
+          });
+        }
+      });
+      const artists_json = Array.from(artistOccurrencesMap.values());
+
+      const total_tracks = tracks_json.length;
+      const distinct_artist_count = artists_json.length;
+
+      // user_id for the aggregate record is the submitted_by_user_id from the playlist record
+      const aggregateUserId = playlistToInsert.submitted_by_user_id;
+
+      const aggregateData = {
+        playlist_id: newDbPlaylistId,
+        user_id: aggregateUserId, // Can be null if not submitted by a logged-in user
+        tracks_json,
+        artists_json,
+        total_tracks,
+        distinct_artist_count,
+        // last_aggregated_at will be set by the database trigger
+      };
+
+      console.log('[Story 8.2] Prepared aggregate data:', JSON.stringify(aggregateData, null, 2));
+
+      const { error: upsertError } = await supabase
+        .from('playlist_track_artist_aggregates')
+        .upsert(aggregateData, { onConflict: 'playlist_id' });
+
+      if (upsertError) {
+        console.error(
+          `[Story 8.2] Error upserting playlist aggregates for playlist ID ${newDbPlaylistId}:`,
+          upsertError
+        );
+        // AC5: Log error but return success for playlist import itself
+        // The overall function will still return success, but we log this specific error.
+        // Optionally, we could modify the return status to 'created_with_aggregation_error'
+        // For now, just logging and proceeding.
+      } else {
+        console.log(
+          `[Story 8.2] Successfully upserted aggregates for playlist ID: ${newDbPlaylistId}`
+        );
+      }
+    } catch (aggregationError) {
+      console.error(
+        `[Story 8.2] Exception during aggregation for playlist ID ${newDbPlaylistId}:`,
+        aggregationError
+      );
+      // AC5: Log error but return success for playlist import itself
+    }
+    // --- END AGGREGATION LOGIC FOR Story 8.2 ---
+
     return {
       success: true,
       status: 'created',
@@ -387,9 +469,19 @@ export async function importPlaylist(playlistSpotifyId: string): Promise<ImportP
     console.error('Exception during Spotify playlist import process:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
     // Determine a more specific status if possible, or keep general
+    // Ensure this part is not accidentally duplicated if you are merging.
+    // Check if playlistIdDb was set (meaning metadata might have been saved before this generic catch)
+    // const currentPlaylistIdDb = newDbPlaylistId; // This variable might not be in scope here.
+    // For simplicity, sticking to the original error statuses unless aggregation specifically fails.
+
     return {
       success: false,
-      status: 'error_saving_meta',
+      // status: 'error_saving_meta', // This might be too generic if error occurs after meta save
+      // Consider if a more specific error status is needed if error is after metadata save
+      // but before aggregation.
+      // For now, using a general status if newDbPlaylistId is not available,
+      // otherwise the status might have been set more specifically by earlier returns.
+      status: 'error_saving_meta', // Fallback, might be overridden by more specific error returns above
       message: `Failed to import playlist: ${errorMessage}`,
     };
   }

@@ -10,7 +10,7 @@ export async function getUserTopArtistIds(
   supabase: SupabaseClient,
   userId: string
 ): Promise<Set<string>> {
-  console.log(`[user-profile-queries] Fetching top artists for user ID: ${userId}`);
+  // console.log(`[user-profile-queries] Fetching top artists for user ID: ${userId}`);
   const { data: topArtistsData, error: topArtistsError } = await supabase
     .from('user_top_artists')
     .select('artist_spotify_id')
@@ -30,6 +30,6 @@ export async function getUserTopArtistIds(
   const artistIds = new Set(
     topArtistsData.map((artist) => artist.artist_spotify_id).filter((id) => !!id) as string[]
   );
-  console.log(`[user-profile-queries] Found ${artistIds.size} top artist IDs for user.`);
+  // console.log(`[user-profile-queries] Found ${artistIds.size} top artist IDs for user.`);
   return artistIds;
 }

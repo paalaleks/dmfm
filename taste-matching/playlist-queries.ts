@@ -11,10 +11,6 @@ export async function getCandidatePlaylists(
   supabase: SupabaseClient,
   currentUserId: string
 ): Promise<Playlist[]> {
-  console.log(
-    `[playlist-queries] Fetching candidate playlists, excluding those from user ID: ${currentUserId}`
-  );
-
   const { data: playlistsData, error: playlistsError } = await supabase
     .from('playlists')
     // Select specific columns, assuming 'spotify_playlist_id' is the correct column name in your DB
@@ -47,7 +43,8 @@ export async function getCandidatePlaylists(
     image_url: dbPlaylist.image_url,
   }));
 
-  console.log(`[playlist-queries] Found and mapped ${mappedPlaylists.length} candidate playlists.`);
+  // console.log('[playlist-queries] Mapped playlists:', mappedPlaylists);
+
   return mappedPlaylists;
 }
 
@@ -68,7 +65,6 @@ export async function getPlaylistArtistIds(
   supabase: SupabaseClient,
   playlistId: string
 ): Promise<Set<string>> {
-  console.log(`[playlist-queries] Fetching tracks for playlist ID: ${playlistId}`);
   const { data: tracksData, error: tracksError } = await supabase
     .from('playlist_tracks')
     .select('track_artists') // Only select the track_artists JSONB field
@@ -100,8 +96,5 @@ export async function getPlaylistArtistIds(
     }
   });
 
-  console.log(
-    `[playlist-queries] Found ${artistIds.size} unique artist IDs for playlist ${playlistId}.`
-  );
   return artistIds;
 }

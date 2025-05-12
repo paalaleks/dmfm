@@ -2,9 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { Playlist } from '@/types/spotify'; // Assuming this type exists and is appropriate
-import { calculateJaccardIndex } from '@/lib/taste-comparison'; // Assuming this utility exists
-import { getUserTopArtistIds } from '@/queries/user-profile-queries'; // Added import
-import { getCandidatePlaylists, getPlaylistArtistIds } from '@/queries/playlist-queries'; // Added getPlaylistArtistIds
+import { calculateJaccardIndex } from '@/taste-matching/taste-comparison'; // Assuming this utility exists
+import { getUserTopArtistIds } from '@/taste-matching/user-profile-queries'; // Added import
+import { getCandidatePlaylists, getPlaylistArtistIds } from '@/taste-matching/playlist-queries'; // Added getPlaylistArtistIds
 
 // Define a threshold for similarity, can be adjusted
 const SIMILARITY_THRESHOLD = 0.02; // Example: 10% similarity
@@ -20,7 +20,6 @@ interface PlaylistWithTaste extends Playlist {
  * calculates taste similarity, and returns a filtered/sorted list.
  */
 export async function getTasteMatchedPlaylistsAction(): Promise<Playlist[]> {
-  console.log('[Server Action] getTasteMatchedPlaylistsAction invoked.');
   const supabase = await createClient();
 
   try {
@@ -37,21 +36,72 @@ export async function getTasteMatchedPlaylistsAction(): Promise<Playlist[]> {
       return [];
     }
     const userId = user.id;
-    console.log('[Server Action] Authenticated User ID:', userId);
 
     // 1b. Fetch user's top artists (from user_top_artists) into a Set<string>.
-    console.log("[Server Action] Fetching user's top artists...");
     const userTasteProfile = await getUserTopArtistIds(supabase, userId);
+    // console.log(
+    //   `[Server Action] User taste profile size after getUserTopArtistIds: ${userTasteProfile.size}`
+    // );
+
+    // NEW: Fetch artist data from user's playlist aggregates
+    console.log(`[Server Action] Fetching playlist aggregate artist data for user ${userId}...`);
+    const { data: playlistAggregates, error: aggregatesError } = await supabase
+      .from('playlist_track_artist_aggregates')
+      .select('artists_json')
+      .eq('user_id', userId);
+
+    if (aggregatesError) {
+      console.error(
+        `[Server Action] Error fetching playlist_track_artist_aggregates for user ${userId}:`,
+        aggregatesError
+      );
+      // Story AC7: Handle error gracefully, potty fall back. For now, just log.
+      // The userTasteProfile will just contain top artists if this fails.
+    }
+    // End of new code block for fetching playlist aggregates
+
+    // NEW: Process playlistAggregates and add to userTasteProfile
+    if (playlistAggregates && playlistAggregates.length > 0) {
+      // console.log(
+      //   `[Server Action] Found ${playlistAggregates.length} aggregate records for user ${userId}. Processing artists_json...`
+      // );
+      const playlistAggregateArtistIds = new Set<string>();
+      for (const aggregate of playlistAggregates) {
+        if (aggregate.artists_json && Array.isArray(aggregate.artists_json)) {
+          for (const artist of aggregate.artists_json) {
+            if (artist && typeof artist.spotify_artist_id === 'string') {
+              playlistAggregateArtistIds.add(artist.spotify_artist_id);
+            }
+          }
+        }
+      }
+      // console.log(
+      //   `[Server Action] Found ${playlistAggregateArtistIds.size} unique artists in playlist aggregates.`
+      // );
+
+      // const initialProfileSize = userTasteProfile.size;
+      // for (const artistId of playlistAggregateArtistIds) {
+      //   userTasteProfile.add(artistId);
+      // }
+      // const artistsAddedFromAggregates = userTasteProfile.size - initialProfileSize;
+
+      // console.log(
+      //   `[Server Action] Added ${artistsAddedFromAggregates} new unique artists from playlist aggregates to the taste profile.`
+      // );
+      // console.log(
+      //   `[Server Action] User taste profile total size after merging aggregate artists: ${userTasteProfile.size}`
+      // );
+    } else if (!aggregatesError) {
+      // Only log if there wasn't an error already logged
+      console.log(`[Server Action] No playlist aggregate artist data found for user ${userId}.`);
+    }
+    // End of new code block for processing playlistAggregates
 
     if (userTasteProfile.size === 0) {
-      console.log(
-        '[Server Action] User has no top artists or failed to fetch. Returning empty list.'
-      );
       return [];
     }
 
     // 1c. Fetch candidate playlists (from playlists, excluding user's own)
-    console.log('[Server Action] Fetching candidate playlists...');
     const candidatePlaylists: PlaylistWithTaste[] = await getCandidatePlaylists(supabase, userId);
 
     if (candidatePlaylists.length === 0) {
@@ -61,10 +111,7 @@ export async function getTasteMatchedPlaylistsAction(): Promise<Playlist[]> {
 
     // 1d. For each candidate playlist, fetch its tracks and aggregate unique artist Spotify IDs.
     // 1e. Calculate Jaccard Index.
-    console.log('[Server Action] Profiling and comparing playlists...');
     const matchedPlaylists: PlaylistWithTaste[] = [];
-
-    console.log('[Server Action] User Taste Profile:', userTasteProfile);
 
     for (const playlist of candidatePlaylists) {
       // IMPORTANT: The Playlist type from '@/types/spotify' needs to have an 'id' field
@@ -85,11 +132,6 @@ export async function getTasteMatchedPlaylistsAction(): Promise<Playlist[]> {
       // It might not be implemented yet if '@/lib/taste-comparison' is still a placeholder.
       playlist.similarityScore = calculateJaccardIndex(userTasteProfile, playlistArtistSet);
 
-      console.log(
-        `[Server Action] Processing Playlist: "${playlist.name}", Spotify ID: ${playlist.spotify_id}, Internal ID: ${playlist.id}, Artists Found: ${playlistArtistSet.size}, Calculated Score: ${playlist.similarityScore}`
-      );
-      console.log('[Server Action] Playlist Artist Set:', playlistArtistSet);
-
       if (playlist.similarityScore >= SIMILARITY_THRESHOLD) {
         matchedPlaylists.push(playlist);
       }
@@ -98,9 +140,6 @@ export async function getTasteMatchedPlaylistsAction(): Promise<Playlist[]> {
     // 1f. Filter playlists by a similarity threshold and sort them by score.
     // Filtering is done above. Now sort.
     matchedPlaylists.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
-    console.log(
-      `[Server Action] Found ${matchedPlaylists.length} matched playlists after filtering and sorting.`
-    );
 
     // 1g. Return the final list of Playlist objects.
     // Need to strip tasteProfile and similarityScore if Playlist type doesn't include them.

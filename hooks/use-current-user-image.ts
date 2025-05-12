@@ -4,10 +4,14 @@ import { useEffect, useState } from 'react'
 export const useCurrentUserImage = () => {
   const [image, setImage] = useState<string | null>(null)
 
+
+  console.log('image', image);
+
   useEffect(() => {
     const fetchUserImage = async () => {
       try {
         const { data, error } = await createClient().auth.getUser();
+        console.log('data', data.user?.user_metadata);
         if (error) {
           if (error.name !== 'AuthSessionMissingError') {
             console.error(error);
@@ -29,9 +33,9 @@ export const useCurrentUserImage = () => {
           setImage(null);
         }
       }
-    }
-    fetchUserImage()
-  }, [])
+    };
+    fetchUserImage();
+  }, []);
 
   return image
 }

@@ -101,8 +101,9 @@ export const ChatMessageItem = ({
   return (
     <div className={`flex mt-2 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={cn('max-w-[75%] w-fit flex flex-col gap-1 relative', {
+        className={cn('max-w-[75%] w-fit flex flex-col gap-1 relative py-1', {
           'items-end': isOwnMessage,
+          'pl-14': isOwnMessage,
         })}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -111,7 +112,7 @@ export const ChatMessageItem = ({
       >
         {showHeader && !isEditing && (
           <div
-            className={cn('flex items-center gap-2 text-xs px-3', {
+            className={cn('flex items-center gap-2 text-xs px-2 py-1', {
               'justify-end flex-row-reverse': isOwnMessage,
             })}
           >
@@ -139,101 +140,105 @@ export const ChatMessageItem = ({
           </div>
         )}
 
-        {isEditing ? (
-          <div className='w-full flex flex-col gap-1 py-1 px-1'>
-            <textarea
-              value={editText}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
-              className='text-sm resize-none border rounded-md p-2 border-primary focus:ring-primary focus:border-primary bg-background text-foreground'
-              rows={Math.max(1, Math.min(5, editText.split('\n').length))}
-              autoFocus
-            />
-            <div className='flex justify-end gap-1 mt-1'>
+        <div className='relative'>
+          {isEditing ? (
+            <div className='w-full flex flex-col gap-1 py-1 px-1'>
+              <textarea
+                value={editText}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setEditText(e.target.value)
+                }
+                className='text-sm resize-none border rounded-md p-2 border-primary focus:ring-primary focus:border-primary bg-background text-foreground'
+                rows={Math.max(1, Math.min(5, editText.split('\n').length))}
+                autoFocus
+              />
+              <div className='flex justify-end gap-1 mt-1'>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-7 w-7 p-1'
+                  onClick={handleCancelEdit}
+                  aria-label='Cancel edit'
+                >
+                  <X className='h-4 w-4' />
+                </Button>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-7 w-7 p-1 text-green-600 hover:text-green-600 hover:bg-green-600/10'
+                  onClick={handleSaveEdit}
+                  aria-label='Save edit'
+                >
+                  <Check className='h-4 w-4' />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={cn(
+                'py-2 px-3 rounded-xl text-sm w-fit transition-opacity bg-chat-bg1',
+                isOwnMessage ? 'bg-chat-bg2 ' : 'bg-muted text-foreground',
+                isOwnMessage && (isPendingSend || message.isEditPending) && 'opacity-70'
+              )}
+            >
+              {message.content}
+            </div>
+          )}
+
+          {isOwnMessage && showControls && !isEditing && !showDeleteConfirm && (
+            <div
+              className={cn('absolute top-1 flex gap-1', isOwnMessage ? '-left-14' : '-right-14')}
+            >
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-7 w-7 p-1'
-                onClick={handleCancelEdit}
-                aria-label='Cancel edit'
+                className='h-6 w-6 p-1'
+                onClick={handleEditClick}
+                aria-label='Edit message'
               >
-                <X className='h-4 w-4' />
+                <Edit2 className='h-4 w-4' />
               </Button>
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-7 w-7 p-1 text-green-600 hover:text-green-600 hover:bg-green-600/10'
-                onClick={handleSaveEdit}
-                aria-label='Save edit'
+                className='h-6 w-6 p-1 text-destructive hover:text-destructive hover:bg-destructive/10'
+                onClick={handleDeleteClick}
+                aria-label='Delete message'
               >
-                <Check className='h-4 w-4' />
+                <Trash2 className='h-4 w-4' />
               </Button>
             </div>
-          </div>
-        ) : (
-          <div
-            className={cn(
-              'py-2 px-3 rounded-xl text-sm w-fit transition-opacity',
-              isOwnMessage ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground',
-              isOwnMessage && (isPendingSend || message.isEditPending) && 'opacity-70'
-            )}
-          >
-            {message.content}
-          </div>
-        )}
+          )}
 
-        {isOwnMessage && showControls && !isEditing && !showDeleteConfirm && (
-          <div
-            className={cn('absolute -top-2 flex gap-1', isOwnMessage ? '-left-10' : '-right-10')}
-          >
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-6 w-6 p-1'
-              onClick={handleEditClick}
-              aria-label='Edit message'
+          {isOwnMessage && showDeleteConfirm && (
+            <div
+              className={cn(
+                'absolute -top-2 flex flex-col items-end gap-1 p-2 rounded-md shadow-md bg-background border border-border',
+                isOwnMessage ? 'left-[-150px] w-[140px]' : 'right-[-150px] w-[140px]'
+              )}
             >
-              <Edit2 className='h-4 w-4' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-6 w-6 p-1 text-destructive hover:text-destructive hover:bg-destructive/10'
-              onClick={handleDeleteClick}
-              aria-label='Delete message'
-            >
-              <Trash2 className='h-4 w-4' />
-            </Button>
-          </div>
-        )}
-
-        {isOwnMessage && showDeleteConfirm && (
-          <div
-            className={cn(
-              'absolute -top-2 flex flex-col items-end gap-1 p-2 rounded-md shadow-md bg-background border border-border',
-              isOwnMessage ? 'left-[-150px] w-[140px]' : 'right-[-150px] w-[140px]'
-            )}
-          >
-            <p className='text-xs text-foreground/80 text-center w-full'>Delete message?</p>
-            <div className='flex gap-1 w-full justify-end'>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleCancelDelete}
-                className='h-7 px-2 text-xs'
-              >
-                <X className='h-3 w-3 mr-1' /> Cancel
-              </Button>
-              <Button
-                variant='destructive'
-                size='sm'
-                onClick={handleConfirmDelete}
-                className='h-7 px-2 text-xs'
-              >
-                <Check className='h-3 w-3 mr-1' /> Confirm
-              </Button>
+              <p className='text-xs text-foreground/80 text-center w-full'>Delete message?</p>
+              <div className='flex gap-1 w-full justify-end'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleCancelDelete}
+                  className='h-7 px-2 text-xs'
+                >
+                  <X className='h-3 w-3 mr-1' /> Cancel
+                </Button>
+                <Button
+                  variant='destructive'
+                  size='sm'
+                  onClick={handleConfirmDelete}
+                  className='h-7 px-2 text-xs'
+                >
+                  <Check className='h-3 w-3 mr-1' /> Confirm
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

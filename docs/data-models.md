@@ -310,7 +310,6 @@ Stores individual chat messages sent by users in chat rooms.
     *   `CREATE POLICY "Users can insert their own interactions." ON public.user_playlist_interactions FOR INSERT WITH CHECK (auth.uid() = user_id);`
     *   `CREATE POLICY "Service role can manage interactions." ON public.user_playlist_interactions FOR ALL USING (auth.role() = 'service_role');`
 
-#### 2.9. `user_taste_profiles` (Existing - Future Undetermined)
 
 *   **Purpose (Original):** Stores aggregated music taste information for users based on their Spotify activity.
 *   **Status:** Existing table. Its future is undetermined; it might be deprecated in favor of granular `user_top_artists`/`user_top_tracks` or serve as an aggregated summary. No changes planned in this story.
@@ -440,13 +439,6 @@ erDiagram
         TEXT interaction_type
         TIMESTAMPTZ interacted_at
         JSONB metadata
-    }
-
-    user_taste_profiles {
-        UUID user_id PK FK "to profiles.id"
-        TEXT[] top_artist_ids
-        TEXT[] top_track_ids
-        TIMESTAMPTZ last_updated
     }
 ```
 

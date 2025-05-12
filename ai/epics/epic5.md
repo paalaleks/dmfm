@@ -1,4 +1,4 @@
-# Epic 4: Enhanced Chat Experience (@mentions)
+# Epic 5: Enhanced Chat Experience (@mentions)
 
 **Status:** Draft
 

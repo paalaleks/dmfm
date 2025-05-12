@@ -1,14 +1,19 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import type { MessageSenderProfile, ChatMessage } from '@/hooks/use-realtime-chat';
-import { RealtimeChat } from '@/components/realtime-chat';
-// import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'; // Already removed
+// import dynamic from 'next/dynamic'; // Removed
+import RealtimeChatLoader from '@/components/realtime-chat-loader'; // Added
 
 interface ChatRoomPagePromise {
   params: Promise<{
     chatId: string; // This will be the UUID of the chat room from the URL
   }>;
 }
+
+// const RealtimeChat = dynamic( // Removed
+// () => import('@/components/realtime-chat').then((mod) => mod.RealtimeChat), // Removed
+// { ssr: false } // Removed
+// ); // Removed
 
 export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
   const { chatId } = await params;
@@ -43,12 +48,8 @@ export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
     redirect('/login?error=username_missing');
   }
 
-  // The currentUserProfileData is now guaranteed to be MessageSenderProfile compatible
   const currentUserProfile = currentUserProfileData;
-  // At this point, currentUserProfile.username is guaranteed to be a non-null, non-empty string.
-  // We can assert it for TypeScript if direct usage as prop causes issues, or rely on the component prop type.
 
-  // Fetch initial messages for the room - THIS LOGIC WILL BE MOVED TO THE CLIENT
   let initialMessages: ChatMessage[] = [];
 
   const { data: initialMessagesData, error: messagesError } = await supabase
@@ -94,30 +95,21 @@ export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
 
         return {
           id: msg.id as number | string,
-          clientSideId: msg.id.toString(), // Add clientSideId for SSR messages
+          clientSideId: msg.id.toString(),
           content: msg.content as string,
           created_at: msg.created_at || new Date().toISOString(),
           profile: userProfile,
-          isOptimistic: false, // SSR messages are not optimistic
+          isOptimistic: false,
         };
       })
       .filter(Boolean) as ChatMessage[];
   }
 
   return (
-    <div className='h-dvh flex flex-col relative pt-10'>
-      {/* <div
-        className='absolute left-0 right-0 top-12
-                 bg-gradient-to-b from-teal-dark to-transparent
-                 h-14
-                 z-40 
-                 pointer-events-none'
-      /> */}
-      <RealtimeChat
-        roomName={chatId}
-        currentUserProfile={currentUserProfile}
-        initialMessages={initialMessages}
-      />
-    </div>
+    <RealtimeChatLoader // Changed
+      roomName={chatId}
+      currentUserProfile={currentUserProfile}
+      initialMessages={initialMessages}
+    />
   );
 }

@@ -30,7 +30,7 @@ export function LoginForm({
         provider: 'spotify',
         options: {
           scopes:
-            'user-read-email user-read-private, streaming, user-modify-playback-state, user-read-playback-state, playlist-modify-public, user-library-read, user-library-modify, user-top-read',
+            'user-read-email user-read-private, streaming, user-modify-playback-state, user-read-playback-state, playlist-modify-public, user-library-read, user-library-modify, user-top-read playlist-read-private',
           redirectTo: `${window.location.origin}/auth/oauth?next=/chat`,
         },
       });

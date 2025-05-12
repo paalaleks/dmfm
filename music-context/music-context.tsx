@@ -34,7 +34,7 @@ import {
 } from './spotify-api';
 
 // Import the Server Action
-import { getTasteMatchedPlaylistsAction } from '@/app/_actions/tastematched-playlists';
+import { getTasteMatchedPlaylistsAction } from '@/taste-matching/tastematched-playlists';
 
 // Define the initial state
 const initialState: MusicContextState = {
@@ -316,12 +316,28 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         setCurrentPlaylistIndex(playlistIndexInMatched !== -1 ? playlistIndexInMatched : null);
         setCurrentPlaylistName(playlist.name);
       } catch (e) {
-        const userMessage =
-          e instanceof Error
-            ? e.message
-            : `An error occurred while trying to play "${playlist.name}"`;
-        setError(userMessage);
-        toast.error(userMessage);
+        const playlistIdentifier = playlist?.name || playlist?.spotify_id || 'Unknown Playlist';
+        let detailedErrorMessage = `Error playing playlist "${playlistIdentifier}": `;
+
+        if (
+          e instanceof Error &&
+          e.message &&
+          e.message.includes('Spotify API Error (403)') &&
+          e.message.includes('Restriction violated')
+        ) {
+          detailedErrorMessage += `Playback failed, possibly due to restricted content at the start of the playlist. (Spotify: ${e.message})`;
+          console.error(
+            `[MusicContext] Playback attempt for playlist ID: ${playlist?.spotify_id}, Name: "${playlist?.name}", trackIndex: ${trackIndex} failed with 403 Restriction Violated.`,
+            'Original error:',
+            e
+          );
+        } else if (e instanceof Error) {
+          detailedErrorMessage += e.message;
+        } else {
+          detailedErrorMessage += 'An unknown error occurred.';
+        }
+        setError(detailedErrorMessage);
+        toast.error(detailedErrorMessage);
       }
     },
     [isDisabled, isReady, deviceId, tokenRef, tasteMatchedPlaylists]
@@ -359,7 +375,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         setIsCurrentTrackSaved(null);
         return;
       }
-      const token = tokenRef.current;
+      const token = await getValidSpotifyToken();
       if (!token || !trackId) {
         setIsCurrentTrackSaved(null);
         return;
@@ -372,7 +388,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         setIsCurrentTrackSaved(null);
       }
     },
-    [isDisabled, tokenRef]
+    [isDisabled]
   );
 
   const saveCurrentTrack = useCallback(async () => {
@@ -383,7 +399,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       );
       return;
     }
-    const token = tokenRef.current;
+    const token = await getValidSpotifyToken();
     const currentTrackId = playbackState?.track_window?.current_track?.id;
     if (!token || !currentTrackId) {
       console.warn('No token or current track to save.');
@@ -402,7 +418,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       toast.error(errorMsg);
       setIsCurrentTrackSaved(false);
     }
-  }, [isDisabled, tokenRef, playbackState]);
+  }, [isDisabled, playbackState]);
 
   const unsaveCurrentTrack = useCallback(async () => {
     if (isDisabled) {
@@ -412,7 +428,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       );
       return;
     }
-    const token = tokenRef.current;
+    const token = await getValidSpotifyToken();
     const currentTrackId = playbackState?.track_window?.current_track?.id;
     if (!token || !currentTrackId) {
       console.warn('No token or current track to unsave.');
@@ -431,7 +447,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       toast.error(errorMsg);
       setIsCurrentTrackSaved(true);
     }
-  }, [isDisabled, tokenRef, playbackState]);
+  }, [isDisabled, playbackState]);
 
   const checkIfPlaylistIsFollowed = useCallback(
     async (playlistId: string) => {
@@ -439,26 +455,20 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         setIsCurrentPlaylistFollowed(null);
         return;
       }
-      const token = tokenRef.current;
-      const currentSpotifyUserId = userSession.userSpotifyId;
-
-      if (!token || !playlistId || !currentSpotifyUserId) {
+      const token = await getValidSpotifyToken();
+      if (!token || !playlistId) {
         setIsCurrentPlaylistFollowed(null);
         return;
       }
       try {
-        const isFollowed = await checkIfPlaylistIsFollowedAPI(
-          token,
-          playlistId,
-          currentSpotifyUserId
-        );
+        const isFollowed = await checkIfPlaylistIsFollowedAPI(token, playlistId);
         setIsCurrentPlaylistFollowed(isFollowed);
       } catch (err) {
         console.error('[MusicContext] Error in checkIfPlaylistIsFollowed:', err);
         setIsCurrentPlaylistFollowed(null);
       }
     },
-    [isDisabled, tokenRef, userSession.userSpotifyId]
+    [isDisabled]
   );
 
   const followCurrentPlaylist = useCallback(async () => {
@@ -640,6 +650,14 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
     });
 
     newPlayer.addListener('player_state_changed', async (sdkPlaybackState) => {
+      // Check if this player instance is still the active one in the context
+      if (playerRef.current !== newPlayer) {
+        console.warn(
+          `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] Event from a stale or disconnected player instance. Ignoring.`
+        );
+        return;
+      }
+
       if (!sdkPlaybackState) {
         console.warn(
           `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] State is null. Clearing playbackState.`
@@ -682,7 +700,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
 
         if (resolvedTrackInfoFromAPI) {
           if (resolvedTrackInfoFromAPI.is_playable) {
-            let finalTrackForState = mapApiTrackToSdkTrack(resolvedTrackInfoFromAPI);
+            const finalTrackForState = mapApiTrackToSdkTrack(resolvedTrackInfoFromAPI);
             if (
               resolvedTrackInfoFromAPI.linked_from &&
               resolvedTrackInfoFromAPI.id !== currentSdkTrackId
@@ -690,9 +708,6 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
               toast.info(
                 `Track "${currentSdkTrack.name}" relinked to: ${resolvedTrackInfoFromAPI.name}`
               );
-            }
-            if (currentSdkTrack.id === resolvedTrackInfoFromAPI.id) {
-              finalTrackForState = currentSdkTrack;
             }
 
             const updatedPlaybackState: Spotify.PlaybackState = {
@@ -878,16 +893,9 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
     if (currentTrackId) checkIfTrackIsSaved(currentTrackId).catch(console.error);
     else setIsCurrentTrackSaved(null);
 
-    if (currentPlaylistId && userSession.userSpotifyId)
-      checkIfPlaylistIsFollowed(currentPlaylistId).catch(console.error);
+    if (currentPlaylistId) checkIfPlaylistIsFollowed(currentPlaylistId).catch(console.error);
     else setIsCurrentPlaylistFollowed(null);
-  }, [
-    playbackState,
-    userSession.userSpotifyId,
-    checkIfTrackIsSaved,
-    checkIfPlaylistIsFollowed,
-    isDisabled,
-  ]);
+  }, [playbackState, checkIfTrackIsSaved, checkIfPlaylistIsFollowed, isDisabled]);
 
   useEffect(() => {
     if (isDisabled) {
