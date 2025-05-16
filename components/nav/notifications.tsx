@@ -27,7 +27,12 @@ export default function Notifications() {
           <Bell className='h-6 w-6 text-accent2 hover:text-accent2/90' />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className='w-80 md:w-96' align='end' forceMount></PopoverContent>
+      <PopoverContent
+        className='w-80 md:w-96'
+        align='end'
+        forceMount
+        sideOffset={8}
+      ></PopoverContent>
     </Popover>
   );
 }

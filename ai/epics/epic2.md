@@ -27,5 +27,8 @@ Establish mechanisms for ingesting user-related playlist data (from shared/playe
 *   **Story 2.4: Develop Initial Taste Comparison Logic**
     *   *Goal:* Create basic functions or logic to compare user taste profiles (based on stored top items and playlist data) to identify potential matches or similarities (e.g., calculating overlap percentage).
     *   *Status:* Done
+*   **Story 2.5: Display and Manage User-Submitted Playlists**
+    *   *Goal:* Provide users with an interface to view their imported playlists and allow them to delete playlists they no longer want in the system. This includes handling all necessary database cleanup via cascading deletes.
+    *   *Status:* To Do
 
 *(Note: Story breakdown and goals are preliminary and may be refined.)* 

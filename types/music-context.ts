@@ -7,7 +7,6 @@ export interface MusicContextState {
   playbackState: Spotify.PlaybackState | null;
   currentVolumePercent: number | null;
   error: string | null;
-
   // User Info
   userSpotifyId: string | null;
 
@@ -39,4 +38,9 @@ export interface MusicContextState {
   checkIfPlaylistIsFollowed: (playlistId: string) => Promise<void>;
   followCurrentPlaylist: () => Promise<void>;
   unfollowCurrentPlaylist: () => Promise<void>;
+
+  // Timeline State & Seek Capability
+  trackPositionMs: number | null;
+  trackDurationMs: number | null;
+  seek: (positionMs: number) => Promise<void>;
 }

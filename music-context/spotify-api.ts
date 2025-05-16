@@ -1,5 +1,9 @@
 import { SpotifyApiTrackFull, Playlist } from '../types/spotify';
-import { getValidSpotifyToken } from './user-session'; // Import for token refresh
+import { getSpotifyToken } from './token-manager'; // Import from token-manager instead
+
+// Constants for network retry logic
+const MAX_NETWORK_RETRIES = 2; // Retry up to 2 additional times (3 total attempts)
+const NETWORK_RETRY_DELAY_MS = 1000; // Delay between retries in milliseconds
 
 // Generic Spotify API Call Helper
 export const makeSpotifyApiCall = async <T = unknown>(
@@ -10,13 +14,13 @@ export const makeSpotifyApiCall = async <T = unknown>(
   isRetry: boolean = false // Added to prevent infinite refresh loops
 ): Promise<T> => {
   if (!token && !isRetry) {
-    // Allow retry even if initial token was null, getValidSpotifyToken will handle it
-    // If it's a retry and token is still null, getValidSpotifyToken would have been called by the first attempt
+    // Allow retry even if initial token was null, getSpotifyToken will handle it
+    // If it's a retry and token is still null, getSpotifyToken would have been called by the first attempt
     // and failed, so we shouldn't proceed further if we are in a retry and no token was obtained.
     console.warn(
       `[Spotify API] No token for ${method} ${endpoint}, attempting to get a valid token.`
     );
-    const newToken = await getValidSpotifyToken();
+    const newToken = await getSpotifyToken();
     if (!newToken) {
       throw new Error('Spotify token not available and refresh failed before API call.');
     }
@@ -24,7 +28,7 @@ export const makeSpotifyApiCall = async <T = unknown>(
     return makeSpotifyApiCall(newToken, endpoint, method, body, true);
   }
   if (!token && isRetry) {
-    // This means the first attempt (which called getValidSpotifyToken) failed to get a token.
+    // This means the first attempt (which called getSpotifyToken) failed to get a token.
     throw new Error('Spotify token not available after refresh attempt for API call.');
   }
 
@@ -35,11 +39,50 @@ export const makeSpotifyApiCall = async <T = unknown>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response!: Response; // Definite assignment assertion, as loop will either assign or throw
+  let lastNetworkError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt++) {
+    try {
+      response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      lastNetworkError = null; // Clear error on successful fetch attempt
+      break; // Exit loop if fetch was successful (i.e., did not throw a network error)
+    } catch (e) {
+      if (e instanceof TypeError && e.message.toLowerCase().includes('failed to fetch')) {
+        lastNetworkError = e;
+        console.warn(
+          `[Spotify API] Network error ("Failed to fetch") on attempt ${attempt + 1} of ${MAX_NETWORK_RETRIES + 1} for ${method} ${endpoint}. Retrying in ${NETWORK_RETRY_DELAY_MS / 1000}s...`
+        );
+        if (attempt < MAX_NETWORK_RETRIES) {
+          await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_DELAY_MS));
+        } else {
+          console.error(
+            `[Spotify API] Network error ("Failed to fetch") for ${method} ${endpoint} after ${MAX_NETWORK_RETRIES + 1} attempts. Final error: ${e.message}`
+          );
+          throw e; // Re-throw the last "Failed to fetch" error after all retries
+        }
+      } else {
+        // Different error type (not "Failed to fetch" TypeError), re-throw immediately
+        console.error(`[Spotify API] Non-network error during fetch for ${method} ${endpoint}:`, e);
+        throw e;
+      }
+    }
+  }
+
+  if (!response) {
+    // This case should ideally not be reached if the loop logic is correct (either assigns response or throws)
+    // but serves as a fallback.
+    throw (
+      lastNetworkError ||
+      new Error(
+        `[Spotify API] Fetch failed for ${method} ${endpoint} after retries without a valid response object.`
+      )
+    );
+  }
 
   if (!response.ok) {
     let errorBody = '';
@@ -53,7 +96,7 @@ export const makeSpotifyApiCall = async <T = unknown>(
       console.warn(
         `[Spotify API] Received 401 for ${method} ${endpoint}. Attempting token refresh and retry.`
       );
-      const newToken = await getValidSpotifyToken(); // This will attempt to call our API endpoint
+      const newToken = await getSpotifyToken(); // This will attempt to call our API endpoint
       if (newToken) {
         console.log(`[Spotify API] Token refreshed successfully. Retrying ${method} ${endpoint}.`);
         return makeSpotifyApiCall(newToken, endpoint, method, body, true); // Pass true for isRetry
@@ -297,9 +340,9 @@ export const playPlaylistAPI = async (
       'PUT',
       initialPlayBody
     );
-    console.log(
-      `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) at index ${validTrackIndex}.`
-    );
+    // console.log(
+    //   `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) at index ${validTrackIndex}.`
+    // );
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (
@@ -401,9 +444,9 @@ export const playPlaylistAPI = async (
                 context_uri: contextUri,
                 offset: { position: actualTrackIndexInPlaylist },
               });
-              console.log(
-                `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) with fallback using context_uri at index ${actualTrackIndexInPlaylist} (Track: "${currentTrack.name}")`
-              );
+              // console.log(
+              //   `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) with fallback using context_uri at index ${actualTrackIndexInPlaylist} (Track: "${currentTrack.name}")`
+              // );
               return; // SUCCESS!
             } catch (contextPlayError: unknown) {
               const contextPlayErrorMessage =

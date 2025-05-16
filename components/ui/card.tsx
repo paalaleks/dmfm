@@ -61,14 +61,13 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function CardContent({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="card-content"
-      className={cn("px-6", className)}
-      {...props}
-    />
-  );
+interface CardContentProps extends React.HTMLAttributes<HTMLElement> {
+  as?: 'div' | 'ul';
+  className?: string;
+}
+
+function CardContent({ className, as: Tag = 'div', ...props }: CardContentProps) {
+  return <Tag data-slot='card-content' className={cn('px-6', className)} {...props} />;
 }
 
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {

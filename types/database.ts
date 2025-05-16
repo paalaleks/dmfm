@@ -66,6 +66,57 @@ export type Database = {
         };
         Relationships: [];
       };
+      playlist_track_artist_aggregates: {
+        Row: {
+          artists_json: Json;
+          created_at: string;
+          distinct_artist_count: number;
+          id: string;
+          last_aggregated_at: string;
+          playlist_id: string;
+          total_tracks: number;
+          tracks_json: Json;
+          user_id: string | null;
+        };
+        Insert: {
+          artists_json?: Json;
+          created_at?: string;
+          distinct_artist_count?: number;
+          id?: string;
+          last_aggregated_at?: string;
+          playlist_id: string;
+          total_tracks?: number;
+          tracks_json?: Json;
+          user_id?: string | null;
+        };
+        Update: {
+          artists_json?: Json;
+          created_at?: string;
+          distinct_artist_count?: number;
+          id?: string;
+          last_aggregated_at?: string;
+          playlist_id?: string;
+          total_tracks?: number;
+          tracks_json?: Json;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'playlist_track_artist_aggregates_playlist_id_fkey';
+            columns: ['playlist_id'];
+            isOneToOne: true;
+            referencedRelation: 'playlists';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'playlist_track_artist_aggregates_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       playlist_tracks: {
         Row: {
           added_at: string | null;
@@ -205,7 +256,42 @@ export type Database = {
         };
         Relationships: [];
       };
-
+      user_playlist_matches: {
+        Row: {
+          id: string;
+          matched_at: string;
+          playlist_id: string;
+          user_id: string;
+        };
+        Insert: {
+          id?: string;
+          matched_at?: string;
+          playlist_id: string;
+          user_id: string;
+        };
+        Update: {
+          id?: string;
+          matched_at?: string;
+          playlist_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'user_playlist_matches_playlist_id_fkey';
+            columns: ['playlist_id'];
+            isOneToOne: false;
+            referencedRelation: 'playlists';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'user_playlist_matches_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       user_top_artists: {
         Row: {
           artist_spotify_id: string;
@@ -299,7 +385,18 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      calculate_jaccard_index_text_arrays: {
+        Args: { array1: string[]; array2: string[] };
+        Returns: number;
+      };
+      match_all_playlists: {
+        Args: Record<PropertyKey, never>;
+        Returns: undefined;
+      };
+      test_playlist_user_matching: {
+        Args: { playlist_id_param: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       room_role: 'DJ' | 'member';

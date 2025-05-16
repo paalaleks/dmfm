@@ -118,6 +118,7 @@ export const ChatMessageItem = ({
           >
             <Avatar className='h-6 w-6'>
               <AvatarImage
+                className='object-cover'
                 src={message.profile?.avatar_url || undefined}
                 alt={message.profile?.username || 'U'}
               />

@@ -179,6 +179,7 @@ Stores individual chat messages sent by users in chat rooms.
 *   **RLS Policies (Example for new state - to be confirmed/refined in migration):**
     *   `CREATE POLICY "Authenticated users can view all playlists." ON public.playlists FOR SELECT USING (auth.role() = 'authenticated');`
     *   `CREATE POLICY "Users can insert playlists they submit." ON public.playlists FOR INSERT WITH CHECK (auth.uid() = submitted_by_user_id);`
+    *   `CREATE POLICY "Users can delete their own playlists" ON public.playlists FOR DELETE USING (auth.uid() = submitted_by_user_id);`
     *   `CREATE POLICY "Service role can manage playlists." ON public.playlists FOR ALL USING (auth.role() = 'service_role');`
 
 #### 2.5. `playlist_items` (Existing as `playlist_tracks`, to be Altered)

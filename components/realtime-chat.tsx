@@ -75,8 +75,8 @@ export const RealtimeChat = ({
   // console.log('RealtimeChat: isConnected', isConnected);
 
   return (
-    <div className='h-dvh flex flex-col pt-10'>
-      <div className='flex flex-col h-full w-full bg-background text-foreground antialiased'>
+    <div className='flex flex-col pt-10 bg-background h-screen'>
+      <div className='flex flex-col h-full w-full'>
         {/* Header area for Room Info / Presence */}
 
         {/* Messages Area */}

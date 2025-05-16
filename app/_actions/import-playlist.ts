@@ -2,67 +2,16 @@
 
 import { getSpotifyAccessToken } from '@/lib/spotify-accesstoken';
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server';
+import {
+  SpotifyPlaylist,
+  SpotifyPlaylistItem,
+  SpotifyPlaylistTracksResponse,
+} from '@/types/spotify';
 
 // Define a basic structure for expected Spotify Playlist object
 // This can be expanded based on actual needs and Spotify API response
-interface SpotifyPlaylist {
-  id: string;
-  name: string;
-  description: string;
-  owner: {
-    display_name?: string;
-    id: string;
-  };
-  images: { url: string; height?: number; width?: number }[];
-  tracks: {
-    // This part might be fetched separately or have a summary here
-    href: string;
-    total: number;
-  };
-  // ... other fields as needed
-}
 
 // Interfaces for Spotify Tracks
-interface SpotifyTrackArtist {
-  id: string;
-  name: string;
-}
-
-interface SpotifyAlbumImage {
-  url: string;
-  height?: number;
-  width?: number;
-}
-
-interface SpotifyTrackAlbum {
-  id: string;
-  name: string;
-  images: SpotifyAlbumImage[];
-}
-
-interface SpotifyPlaylistItem {
-  track: {
-    id: string;
-    name: string;
-    artists: SpotifyTrackArtist[];
-    album: SpotifyTrackAlbum;
-    duration_ms: number;
-    explicit: boolean;
-    preview_url: string | null;
-    uri: string;
-  } | null;
-  added_at: string;
-}
-
-interface SpotifyPlaylistTracksResponse {
-  href: string;
-  items: SpotifyPlaylistItem[];
-  limit: number;
-  next: string | null;
-  offset: number;
-  previous: string | null;
-  total: number;
-}
 
 interface DbPlaylistInsert {
   spotify_playlist_id: string;

@@ -57,6 +57,49 @@ As the application matures, or if specific areas prove to be error-prone or crit
 *   Issues found during testing will be tracked (e.g., using GitHub Issues).
 *   Prioritization of bug fixes will be based on severity and impact on core functionality.
 
+### 6. Testing Specific Features
+
+#### 6.1 Spotify Token Refresh (Development Only)
+
+To facilitate efficient testing of the Spotify token refresh logic and its impact on the application, development-only tools have been implemented. These tools allow simulating or forcing token expiry events without waiting for the standard one-hour expiry period.
+
+**Important:** These mechanisms are strictly for development and debugging purposes and are not active in production builds.
+
+**Mechanisms:**
+
+1.  **Shortened Token Lifetime (Environment Variable):**
+    *   **How to use:** Set the `NEXT_PUBLIC_DEV_TOKEN_LIFETIME_SECONDS` environment variable in your local `.env.local` file.
+        ```env
+        NEXT_PUBLIC_DEV_TOKEN_LIFETIME_SECONDS=120 # Example: Token expires in 2 minutes
+        ```
+    *   **Effect:** When the application initializes or a new token is fetched in development mode, if this variable is set to a positive number, the token's effective lifetime will be overridden to this value. The proactive refresh logic in `music-context/user-session.ts` will then attempt to refresh the token based on this shortened lifetime (typically a few minutes before it's set to expire).
+    *   **Observation:** Check the browser console for logs from `[user-session.ts]` indicating the use of the dev token lifetime and the scheduling of the refresh.
+    *   **Caution:** Setting this value too low (e.g., less than 60 seconds) can lead to very frequent refresh attempts. While the system has safeguards against concurrent refreshes, this can still generate significant log noise and is not recommended for typical testing.
+
+2.  **Force Token Expiry (Browser Console Function):**
+    *   **How to use:** Open your browser's developer console and execute the following global function:
+        ```javascript
+        window._dev_forceExpireTokenNow();
+        ```
+    *   **Effect:** This function (available only in development builds) will instruct `music-context/user-session.ts` to immediately mark the current Spotify token as if it has just expired. This should trigger the proactive refresh logic to attempt a new token fetch from Spotify.
+    *   **Observation:** The console will log messages from `[dev-debug-tools.ts]` indicating the function call and its outcome. Subsequently, you should observe logs from `[user-session.ts]` related to the refresh attempt (e.g., "Attempting to refresh Spotify token...", "Scheduling token refresh...") and logs from `[MusicContext.tsx]` showing the new token being propagated (e.g., in `getOAuthToken` or `tokenRef.current` updates).
+    *   **Rate Limiting & Caution:**
+        *   This function has an internal cooldown period (currently 30 seconds) to prevent accidental spamming of the Spotify API.
+        *   If called during the cooldown, a warning will be logged to the console, and the action will be skipped.
+        *   **It is crucial not to abuse this function.** While safeguards are in place, excessively forcing refreshes could still contribute to hitting Spotify API rate limits if done persistently. Use it judiciously when you specifically need to test an on-demand refresh scenario.
+
+**What to Verify (as per Story 7.6 ACs):**
+
+When using these tools, observe and verify:
+*   Background refresh initiation and successful completion (console logs).
+*   Player stability and uninterrupted playback during a token refresh cycle (if applicable).
+*   Correct and timely updating of token references (`tokenRef.current` in `MusicContext`, internal state in `user-session.ts`).
+*   The `Spotify.Player` instance receiving the new token via its `getOAuthToken` callback.
+*   Correct behavior of any queued or deferred API calls (Story 7.2).
+*   Successful execution of player actions and API calls with the new token immediately post-refresh.
+
+By using these development tools, you can more reliably and efficiently test the robustness of the token refresh mechanism and its integration with other parts of the application.
+
 ---
 
 ## Change Log

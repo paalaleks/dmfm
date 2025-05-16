@@ -29,14 +29,12 @@ export default async function RootLayout({
 
   return (
     <html lang='en' suppressHydrationWarning>
-      <body
-        className={`${cabinetGrotesk.variable} antialiased flex flex-col min-h-screen bg-sidepanels`}
-      >
+      <body className={`${cabinetGrotesk.variable} antialiased flex flex-col bg-sidepanels `}>
         <MusicProvider isDisabled={!user.data.user}>
-          <main className='flex-grow max-w-screen-xl mx-auto w-full bg-background relative'>
+          <main className='flex-grow max-w-screen-xl mx-auto w-full bg-background relative min-h-screen'>
             <Nav user={user.data.user} />
             <div className='absolute top-0 left-0 w-full h-full z-0 noise' />
-            <div className='absolute top-0 left-0 w-full h-full z-0 bg-linear-[170deg,_var(--teal-dark)_25%,_oklch(from_var(--seafoam-green)_l_c_h_/_0.4)_50%,_transparent_70%,_transparent_100%]' />
+
             <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
           </main>
           <Toaster />

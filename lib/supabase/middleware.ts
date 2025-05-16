@@ -38,7 +38,11 @@ export const updateSession = async (request: NextRequest) => {
     const user = await supabase.auth.getUser();
 
     // protected routes
-    if (request.nextUrl.pathname.startsWith('/(protected)') && user.error) {
+    if (
+      (request.nextUrl.pathname.startsWith('/profile') ||
+        request.nextUrl.pathname.startsWith('/chat')) &&
+      user.error
+    ) {
       return NextResponse.redirect(new URL('/auth/login', request.url));
     }
 

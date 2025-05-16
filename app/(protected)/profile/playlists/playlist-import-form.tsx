@@ -4,8 +4,15 @@ import { useState, useTransition } from 'react';
 // Assuming the server action is at app/_actions/import-playlist.ts
 // The relative path from app/(main)/profile/ to app/_actions/ is ../../_actions/
 import { importPlaylist, type ImportPlaylistResult } from '@/app/_actions/import-playlist';
+import { Button } from '@/components/ui/button';
+import { CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 
-export default function PlaylistImportForm() {
+interface PlaylistImportFormProps {
+  onImportSuccess?: () => void;
+}
+
+export default function PlaylistImportForm({ onImportSuccess }: PlaylistImportFormProps) {
   const [inputValue, setInputValue] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +67,9 @@ export default function PlaylistImportForm() {
         if (result.success) {
           setMessage(result.message || 'Playlist processed successfully!');
           setInputValue(''); // Clear input on success
+          if (onImportSuccess) {
+            onImportSuccess();
+          }
         } else {
           setError(result.message || 'Failed to process playlist.');
         }
@@ -71,19 +81,13 @@ export default function PlaylistImportForm() {
   };
 
   return (
-    <div
-      style={{ marginTop: '20px', padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}
-    >
-      <h3>Import Spotify Playlist</h3>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
-      >
+    <CardContent className=''>
+      <form onSubmit={handleSubmit} className='flex flex-col gap-4'>
         <div>
           <label htmlFor='playlistId' style={{ display: 'block', marginBottom: '5px' }}>
             Spotify Playlist ID or URL:
           </label>
-          <input
+          <Input
             type='text'
             id='playlistId'
             name='playlistId'
@@ -91,32 +95,14 @@ export default function PlaylistImportForm() {
             onChange={(e) => setInputValue(e.target.value)}
             placeholder='e.g., 37i9dQZF1DXcBWIGoYBM5M or full URL'
             disabled={isPending}
-            style={{
-              padding: '8px',
-              width: '100%',
-              boxSizing: 'border-box',
-              borderRadius: '4px',
-              border: '1px solid #ddd',
-            }}
           />
         </div>
-        <button
-          type='submit'
-          disabled={isPending}
-          style={{
-            padding: '10px 15px',
-            backgroundColor: isPending ? '#ccc' : '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isPending ? 'not-allowed' : 'pointer',
-          }}
-        >
+        <Button type='submit' disabled={isPending}>
           {isPending ? 'Importing...' : 'Import Playlist'}
-        </button>
+        </Button>
         {message && <p style={{ color: 'green', marginTop: '10px' }}>{message}</p>}
         {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
       </form>
-    </div>
+    </CardContent>
   );
 }

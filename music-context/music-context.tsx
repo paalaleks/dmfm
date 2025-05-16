@@ -9,20 +9,13 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { Playlist, SpotifyApiTrackFull } from '../types/spotify';
+import { Playlist } from '../types/spotify';
 import { MusicContextState } from '../types/music-context';
 import { toast } from 'sonner';
-import { mapApiTrackToSdkTrack } from './spotify-helpers';
 
 // NEW IMPORTS for services
+import { initializeUserSession, subscribeToUserSession, UserSessionState } from './user-session';
 import {
-  initializeUserSession,
-  subscribeToUserSession,
-  getValidSpotifyToken,
-  UserSessionState,
-} from './user-session';
-import {
-  fetchSpotifyTrack as fetchSpotifyTrackAPI,
   checkIfTrackIsSavedAPI,
   saveTrackAPI,
   unsaveTrackAPI,
@@ -33,8 +26,17 @@ import {
   playPlaylistAPI,
 } from './spotify-api';
 
-// Import the Server Action
-import { getTasteMatchedPlaylistsAction } from '@/taste-matching/tastematched-playlists';
+// Import the NEW Server Action
+import { getMatchedPlaylistsForUserAction } from './playlist-actions';
+
+// Add token manager imports
+import {
+  initializeTokenManager,
+  getSpotifyToken,
+  isAuthenticated,
+  getUserId,
+  ensureTokenManagerInitialized,
+} from './token-manager';
 
 // Define the initial state
 const initialState: MusicContextState = {
@@ -44,119 +46,49 @@ const initialState: MusicContextState = {
   playbackState: null,
   currentVolumePercent: 50,
   error: null,
-
-  // User Info
   userSpotifyId: null,
-
-  // Playlist State
   tasteMatchedPlaylists: [],
   currentPlaylistIndex: null,
   currentPlaylistName: null,
-
-  // Save/Follow State
   isCurrentTrackSaved: null,
   isCurrentPlaylistFollowed: null,
-
-  // Player control functions
-  nextTrack: async () => {
-    console.warn(
-      '[MusicContext initialState] Next track function not implemented yet or provider disabled.'
-    );
-  },
-  previousTrack: async () => {
-    console.warn(
-      '[MusicContext initialState] Previous track function not implemented yet or provider disabled.'
-    );
-  },
-  setVolume: async () => {
-    console.warn(
-      '[MusicContext initialState] Set volume function not implemented yet or provider disabled.'
-    );
-  },
-  toggleMute: async () => {
-    console.warn(
-      '[MusicContext initialState] Toggle mute function not implemented yet or provider disabled.'
-    );
-  },
-  toggleShuffle: async () => {
-    console.warn(
-      '[MusicContext initialState] Toggle shuffle function not implemented yet or provider disabled.'
-    );
-  },
-
-  // Playlist control functions
-  playPlaylist: async () => {
-    console.warn(
-      '[MusicContext initialState] Play playlist function not implemented yet or provider disabled.'
-    );
-  },
-  nextPlaylist: async () => {
-    console.warn(
-      '[MusicContext initialState] Next playlist function not implemented yet or provider disabled.'
-    );
-  },
-  previousPlaylist: async () => {
-    console.warn(
-      '[MusicContext initialState] Previous playlist function not implemented yet or provider disabled.'
-    );
-  },
-
-  // Save/Follow Check/Action Methods
-  checkIfTrackIsSaved: async () => {
-    console.warn(
-      '[MusicContext initialState] checkIfTrackIsSaved function not implemented yet or provider disabled.'
-    );
-  },
-  saveCurrentTrack: async () => {
-    console.warn(
-      '[MusicContext initialState] saveCurrentTrack function not implemented yet or provider disabled.'
-    );
-  },
-  unsaveCurrentTrack: async () => {
-    console.warn(
-      '[MusicContext initialState] unsaveCurrentTrack function not implemented yet or provider disabled.'
-    );
-  },
-  checkIfPlaylistIsFollowed: async () => {
-    console.warn(
-      '[MusicContext initialState] checkIfPlaylistIsFollowed function not implemented yet or provider disabled.'
-    );
-  },
-  followCurrentPlaylist: async () => {
-    console.warn(
-      '[MusicContext initialState] followCurrentPlaylist function not implemented yet or provider disabled.'
-    );
-  },
-  unfollowCurrentPlaylist: async () => {
-    console.warn(
-      '[MusicContext initialState] unfollowCurrentPlaylist function not implemented yet or provider disabled.'
-    );
-  },
+  trackPositionMs: null,
+  trackDurationMs: null,
+  seek: async () => Promise.reject(new Error('Seek not available.')),
+  nextTrack: async () => console.warn('Next track not available.'),
+  previousTrack: async () => console.warn('Previous track not available.'),
+  setVolume: async () => console.warn('Set volume not available.'),
+  toggleMute: async () => console.warn('Toggle mute not available.'),
+  toggleShuffle: async () => console.warn('Toggle shuffle not available.'),
+  playPlaylist: async () => console.warn('Play playlist not available.'),
+  nextPlaylist: async () => console.warn('Next playlist not available.'),
+  previousPlaylist: async () => console.warn('Previous playlist not available.'),
+  checkIfTrackIsSaved: async () => console.warn('Check track saved not available.'),
+  saveCurrentTrack: async () => console.warn('Save track not available.'),
+  unsaveCurrentTrack: async () => console.warn('Unsave track not available.'),
+  checkIfPlaylistIsFollowed: async () => console.warn('Check playlist followed not available.'),
+  followCurrentPlaylist: async () => console.warn('Follow playlist not available.'),
+  unfollowCurrentPlaylist: async () => console.warn('Unfollow playlist not available.'),
 };
 
-// Create the context
 const MusicContext = createContext<MusicContextState>(initialState);
 
-// Define Props for the Provider
 interface MusicProviderProps {
   children: ReactNode;
   isDisabled?: boolean;
 }
 
-// Create the Provider Component
 export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabled }) => {
-  // console.log(`[MusicProvider] Rendering. isDisabled: ${isDisabled}`);
-
   const [player, setPlayer] = useState<Spotify.Player | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [isReady, setIsReady] = useState<boolean>(false);
   const [playbackState, setPlaybackState] = useState<Spotify.PlaybackState | null>(null);
   const [currentVolumePercent, setCurrentVolumePercent] = useState<number | null>(50);
   const [error, setError] = useState<string | null>(null);
-  const tokenRef = useRef<string | null>(null);
   const playerRef = useRef<Spotify.Player | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [preMuteVolume, setPreMuteVolume] = useState<number>(0.5);
+  const [isTokenManagerReady, setIsTokenManagerReady] = useState(false);
 
   const [tasteMatchedPlaylists, setTasteMatchedPlaylists] = useState<Playlist[]>([]);
   const [currentPlaylistIndex, setCurrentPlaylistIndex] = useState<number | null>(null);
@@ -166,7 +98,6 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
   const [isCurrentPlaylistFollowed, setIsCurrentPlaylistFollowed] = useState<boolean | null>(null);
 
   const [userSession, setUserSession] = useState<UserSessionState>({
-    spotifyToken: null,
     userSpotifyId: null,
     userId: null,
     isLoading: !isDisabled,
@@ -174,35 +105,46 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
   });
 
   const initialPlaylistAutoPlayedRef = useRef(false);
+  const [trackPositionMs, setTrackPositionMs] = useState<number | null>(null);
+  const [trackDurationMs, setTrackDurationMs] = useState<number | null>(null);
+  const lastProcessedTrackIdRef = useRef<string | null>(null);
+  const trackProgressionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedTrackCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedPlaylistCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const DEBOUNCE_DELAY_MS = 1000;
+  const isSeekingRef = useRef(false);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // New function to fetch and set taste-matched playlists
   const fetchAndSetTasteMatchedPlaylists = useCallback(async () => {
-    if (isDisabled) return;
-    console.log('[MusicContext] Attempting to fetch taste-matched playlists...');
-    if (!userSession.userId || !userSession.spotifyToken) {
-      console.log('[MusicContext] User ID or Spotify token not available. Skipping fetch.');
+    if (isDisabled || !isTokenManagerReady) return;
+    const userId = getUserId();
+    if (!userId) {
+      console.log(
+        '[MusicContext] User ID not available from token manager. Skipping playlist fetch.'
+      );
+      setTasteMatchedPlaylists([]); // Ensure playlists are cleared if no user
+      setCurrentPlaylistIndex(null);
       return;
     }
     try {
-      const playlists = await getTasteMatchedPlaylistsAction();
-      console.log('[MusicContext] Received playlists from server action:', playlists);
+      const playlists = await getMatchedPlaylistsForUserAction(userId);
       setTasteMatchedPlaylists(playlists);
       setCurrentPlaylistIndex(null);
       initialPlaylistAutoPlayedRef.current = false;
       if (playlists.length === 0) {
-        toast.info("Couldn't find any playlists matching your taste right now.");
+        toast.info("Couldn't find any pre-matched playlists for you right now.");
       }
     } catch (err) {
-      console.error('[MusicContext] Error fetching taste-matched playlists:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load taste-matched playlists.');
-      toast.error('Failed to load playlists based on your taste.');
+      console.error('[MusicContext] Error fetching matched playlists:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load matched playlists.');
+      toast.error('Failed to load your matched playlists.');
       setTasteMatchedPlaylists([]);
       setCurrentPlaylistIndex(null);
       initialPlaylistAutoPlayedRef.current = false;
     }
-  }, [userSession.userId, userSession.spotifyToken, isDisabled]);
+  }, [isDisabled, isTokenManagerReady]);
 
-  // --- Start of Player Control Callbacks ---
+  // Player Control Callbacks
   const nextTrack = useCallback(async () => {
     if (isDisabled || !playerRef.current || !isReady) {
       setError('Player not ready for next track.');
@@ -257,9 +199,9 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       return;
     }
     try {
-      const currentVolume = await playerRef.current.getVolume();
-      if (currentVolume > 0) {
-        setPreMuteVolume(currentVolume);
+      const currentVolumeVal = await playerRef.current.getVolume();
+      if (currentVolumeVal > 0) {
+        setPreMuteVolume(currentVolumeVal);
         await playerRef.current.setVolume(0);
         setCurrentVolumePercent(0);
       } else {
@@ -275,9 +217,13 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
   }, [isDisabled, isReady, preMuteVolume]);
 
   const toggleShuffle = useCallback(async () => {
-    const token = tokenRef.current;
-    if (isDisabled || !isReady || !deviceId || !token || playbackState === null) {
-      setError('Player not ready to toggle shuffle.');
+    if (isDisabled || !isReady || !deviceId || playbackState === null || !isTokenManagerReady) {
+      setError('Player not ready to toggle shuffle or auth not ready.');
+      return;
+    }
+    const token = await getSpotifyToken();
+    if (!token) {
+      setError('Unable to toggle shuffle: Token not available');
       return;
     }
     const newShuffleState = !playbackState.shuffle;
@@ -289,14 +235,19 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       setError(`Error toggling shuffle: ${errorMsg}`);
       toast.error(errorMsg);
     }
-  }, [isDisabled, isReady, deviceId, tokenRef, playbackState]);
+  }, [isDisabled, isReady, deviceId, playbackState, isTokenManagerReady]);
 
   const playPlaylist = useCallback(
     async (playlist: Playlist, trackIndex: number = 0) => {
-      const token = tokenRef.current;
-      if (isDisabled || !isReady || !deviceId || !token) {
-        const msg =
-          'Cannot play playlist: Player not ready, device/token missing, or provider disabled.';
+      if (isDisabled || !isReady || !deviceId || !isTokenManagerReady) {
+        const msg = 'Cannot play playlist: Player/auth not ready or device missing.';
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+      const token = await getSpotifyToken();
+      if (!token) {
+        const msg = 'Cannot play playlist: Token not available.';
         setError(msg);
         toast.error(msg);
         return;
@@ -318,19 +269,13 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       } catch (e) {
         const playlistIdentifier = playlist?.name || playlist?.spotify_id || 'Unknown Playlist';
         let detailedErrorMessage = `Error playing playlist "${playlistIdentifier}": `;
-
         if (
           e instanceof Error &&
           e.message &&
           e.message.includes('Spotify API Error (403)') &&
           e.message.includes('Restriction violated')
         ) {
-          detailedErrorMessage += `Playback failed, possibly due to restricted content at the start of the playlist. (Spotify: ${e.message})`;
-          console.error(
-            `[MusicContext] Playback attempt for playlist ID: ${playlist?.spotify_id}, Name: "${playlist?.name}", trackIndex: ${trackIndex} failed with 403 Restriction Violated.`,
-            'Original error:',
-            e
-          );
+          detailedErrorMessage += `Playback failed, possibly due to restricted content. (Spotify: ${e.message})`;
         } else if (e instanceof Error) {
           detailedErrorMessage += e.message;
         } else {
@@ -340,7 +285,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         toast.error(detailedErrorMessage);
       }
     },
-    [isDisabled, isReady, deviceId, tokenRef, tasteMatchedPlaylists]
+    [isDisabled, isReady, deviceId, tasteMatchedPlaylists, isTokenManagerReady]
   );
 
   const nextPlaylist = useCallback(async () => {
@@ -367,15 +312,15 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
     if (prevList) await playPlaylist(prevList);
     else setError('Error finding previous playlist.');
   }, [isDisabled, tasteMatchedPlaylists, currentPlaylistIndex, playPlaylist]);
-  // --- End of Player Control Callbacks ---
 
+  // Save/Follow Check/Action Methods
   const checkIfTrackIsSaved = useCallback(
     async (trackId: string) => {
-      if (isDisabled) {
+      if (isDisabled || !isTokenManagerReady) {
         setIsCurrentTrackSaved(null);
         return;
       }
-      const token = await getValidSpotifyToken();
+      const token = await getSpotifyToken();
       if (!token || !trackId) {
         setIsCurrentTrackSaved(null);
         return;
@@ -388,22 +333,18 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         setIsCurrentTrackSaved(null);
       }
     },
-    [isDisabled]
+    [isDisabled, isTokenManagerReady]
   );
 
   const saveCurrentTrack = useCallback(async () => {
-    if (isDisabled) {
-      console.warn('No token or current track to save, or provider disabled.');
-      setError(
-        'No track is currently playing to save, or user session is invalid, or provider disabled.'
-      );
+    if (isDisabled || !isTokenManagerReady) {
+      setError('Cannot save track: Auth not ready or provider disabled.');
       return;
     }
-    const token = await getValidSpotifyToken();
+    const token = await getSpotifyToken();
     const currentTrackId = playbackState?.track_window?.current_track?.id;
     if (!token || !currentTrackId) {
-      console.warn('No token or current track to save.');
-      setError('No track is currently playing to save, or user session is invalid.');
+      setError('No track playing or token unavailable to save.');
       return;
     }
     try {
@@ -418,21 +359,17 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       toast.error(errorMsg);
       setIsCurrentTrackSaved(false);
     }
-  }, [isDisabled, playbackState]);
+  }, [isDisabled, playbackState, isTokenManagerReady]);
 
   const unsaveCurrentTrack = useCallback(async () => {
-    if (isDisabled) {
-      console.warn('No token or current track to unsave, or provider disabled.');
-      setError(
-        'No track is currently playing to unsave, or user session is invalid, or provider disabled.'
-      );
+    if (isDisabled || !isTokenManagerReady) {
+      setError('Cannot unsave track: Auth not ready or provider disabled.');
       return;
     }
-    const token = await getValidSpotifyToken();
+    const token = await getSpotifyToken();
     const currentTrackId = playbackState?.track_window?.current_track?.id;
     if (!token || !currentTrackId) {
-      console.warn('No token or current track to unsave.');
-      setError('No track is currently playing to unsave, or user session is invalid.');
+      setError('No track playing or token unavailable to unsave.');
       return;
     }
     try {
@@ -447,15 +384,15 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       toast.error(errorMsg);
       setIsCurrentTrackSaved(true);
     }
-  }, [isDisabled, playbackState]);
+  }, [isDisabled, playbackState, isTokenManagerReady]);
 
   const checkIfPlaylistIsFollowed = useCallback(
     async (playlistId: string) => {
-      if (isDisabled) {
+      if (isDisabled || !isTokenManagerReady) {
         setIsCurrentPlaylistFollowed(null);
         return;
       }
-      const token = await getValidSpotifyToken();
+      const token = await getSpotifyToken();
       if (!token || !playlistId) {
         setIsCurrentPlaylistFollowed(null);
         return;
@@ -468,22 +405,25 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         setIsCurrentPlaylistFollowed(null);
       }
     },
-    [isDisabled]
+    [isDisabled, isTokenManagerReady]
   );
 
   const followCurrentPlaylist = useCallback(async () => {
-    if (isDisabled || !tokenRef.current || !playbackState?.context?.uri) {
-      console.warn('No token or current playlist to follow, or provider disabled.');
+    if (isDisabled || !playbackState?.context?.uri || !isTokenManagerReady) {
       setError(
-        'No playlist is currently playing to follow, or user session is invalid, or provider disabled.'
+        'Cannot follow playlist: No playlist playing, auth not ready, or provider disabled.'
       );
       return;
     }
+    const token = await getSpotifyToken();
+    if (!token) {
+      setError('Authentication required to follow playlist.');
+      return;
+    }
     const currentPlaylistId = playbackState.context.uri.split(':')[2];
-
     try {
       setError(null);
-      await followPlaylistAPI(tokenRef.current, currentPlaylistId);
+      await followPlaylistAPI(token, currentPlaylistId);
       setIsCurrentPlaylistFollowed(true);
       toast.success('Playlist followed!');
     } catch (err) {
@@ -493,21 +433,24 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       toast.error(errorMsg);
       setIsCurrentPlaylistFollowed(false);
     }
-  }, [isDisabled, tokenRef, playbackState]);
+  }, [isDisabled, playbackState, isTokenManagerReady]);
 
   const unfollowCurrentPlaylist = useCallback(async () => {
-    if (isDisabled || !tokenRef.current || !playbackState?.context?.uri) {
-      console.warn('No token or current playlist to unfollow, or provider disabled.');
+    if (isDisabled || !playbackState?.context?.uri || !isTokenManagerReady) {
       setError(
-        'No playlist is currently playing to unfollow, or user session is invalid, or provider disabled.'
+        'Cannot unfollow playlist: No playlist playing, auth not ready, or provider disabled.'
       );
       return;
     }
+    const token = await getSpotifyToken();
+    if (!token) {
+      setError('Authentication required to unfollow playlist.');
+      return;
+    }
     const currentPlaylistId = playbackState.context.uri.split(':')[2];
-
     try {
       setError(null);
-      await unfollowPlaylistAPI(tokenRef.current, currentPlaylistId);
+      await unfollowPlaylistAPI(token, currentPlaylistId);
       setIsCurrentPlaylistFollowed(false);
       toast.success('Playlist unfollowed.');
     } catch (err) {
@@ -517,240 +460,148 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       toast.error(errorMsg);
       setIsCurrentPlaylistFollowed(true);
     }
-  }, [isDisabled, tokenRef, playbackState]);
+  }, [isDisabled, playbackState, isTokenManagerReady]);
 
-  // Effect for Spotify SDK Ready
-  useEffect(() => {
-    if (isDisabled) return;
-
-    console.log('[MusicContext SDKListenerEffect] Attaching onSpotifyWebPlaybackSDKReady.');
-    window.onSpotifyWebPlaybackSDKReady = () => {
-      console.log('[MusicContext SDKListenerEffect] onSpotifyWebPlaybackSDKReady FIRED.');
-      setSdkReady(true);
-    };
-    return () => {
-      if (isDisabled) return;
-      console.log(
-        '[MusicContext SDKListenerEffect] Cleanup. Removing onSpotifyWebPlaybackSDKReady.'
-      );
-      window.onSpotifyWebPlaybackSDKReady = () => {};
-    };
-  }, [isDisabled]);
-
-  const lastProcessedTrackIdRef = useRef<string | null>(null);
-
-  const getOAuthToken: Spotify.PlayerInit['getOAuthToken'] = useCallback(
-    async (cb) => {
-      if (isDisabled) {
-        console.warn(
-          '[MusicContext getOAuthToken] Provider disabled. Calling cb with empty string.'
-        );
-        cb('');
+  // Timeline & Seek Functions
+  const seek = useCallback(
+    async (positionMs: number) => {
+      if (isDisabled || !playerRef.current || !isReady) {
+        const msg = 'Seek failed: Player not ready or provider disabled.';
+        setError(msg);
+        toast.error(msg);
+        throw new Error(msg);
+      }
+      if (!playbackState || !trackDurationMs) {
+        const msg = 'Seek failed: No track loaded or duration unknown.';
+        setError(msg);
+        toast.error(msg);
+        throw new Error(msg);
+      }
+      if (isSeekingRef.current) {
         return;
       }
-      console.log('[MusicContext getOAuthToken] Called.');
-      if (!userSession.spotifyToken && !userSession.isLoading) {
-        console.error(
-          '[MusicContext getOAuthToken] No Spotify token in user session. Calling cb with empty string.'
-        );
-        cb('');
-        return;
-      }
-
-      const token = await getValidSpotifyToken();
-      console.log(
-        '[MusicContext getOAuthToken] Token from getValidSpotifyToken:',
-        token ? '****** (exists)' : null
-      );
-      if (token) {
-        cb(token);
-      } else {
-        console.error(
-          '[MusicContext getOAuthToken] Failed to get a valid Spotify token after attempting retrieval/refresh. Calling cb with empty string.'
-        );
-        cb('');
+      isSeekingRef.current = true;
+      const newPosition = Math.max(0, Math.min(positionMs, trackDurationMs));
+      setTrackPositionMs(newPosition);
+      try {
+        await playerRef.current.seek(newPosition);
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : 'Unknown Spotify SDK error';
+        const msg = `Seek failed: ${errMsg}`;
+        setError(msg);
+        toast.error(msg);
+        throw new Error(msg);
+      } finally {
+        if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+        seekTimeoutRef.current = setTimeout(() => {
+          isSeekingRef.current = false;
+        }, 200);
       }
     },
-    [userSession.spotifyToken, userSession.isLoading, isDisabled]
+    [isDisabled, isReady, playbackState, trackDurationMs, setError]
   );
 
+  // PlayerInitEffect
   useEffect(() => {
-    if (isDisabled) return; // Prevent player initialization if disabled
-
-    const effectId = Date.now(); // Unique ID for this effect run
-    console.log(
-      `[MusicContext PlayerInitEffect ${effectId}] Running. sdkReady: ${sdkReady}, userSession.isLoading: ${userSession.isLoading}, userSession.spotifyToken: ${!!userSession.spotifyToken}`
-    );
-
-    if (!sdkReady || userSession.isLoading || !userSession.spotifyToken) {
+    if (isDisabled || !sdkReady || !isTokenManagerReady) {
       if (playerRef.current) {
-        console.log(
-          `[MusicContext PlayerInitEffect ${effectId}] Conditions not met (SDK ready/session loaded/token present). Disconnecting existing player.`
-        );
-        playerRef.current.disconnect();
+        if (typeof playerRef.current.disconnect === 'function') playerRef.current.disconnect();
         setPlayer(null);
         playerRef.current = null;
         setIsReady(false);
-        setPlaybackState(null);
         setDeviceId(null);
+        setPlaybackState(null);
       }
       return;
     }
+    if (playerRef.current) return;
 
-    if (playerRef.current) {
-      console.log(
-        `[MusicContext PlayerInitEffect ${effectId}] Player already exists and conditions met. Skipping re-initialization.`
-      );
-      return;
-    }
+    const getOAuthTokenCallback: Spotify.PlayerInit['getOAuthToken'] = async (cb) => {
+      if (isDisabled) {
+        cb('');
+        return;
+      }
+      const token = await getSpotifyToken();
+      cb(token || '');
+    };
 
-    console.log(
-      `[MusicContext PlayerInitEffect ${effectId}] Conditions met. Attempting to initialize new Spotify.Player.`
-    );
+    const effectRunId = Date.now();
+    console.log(`[MusicContext PlayerInitEffect ${effectRunId}] Initializing new player.`);
 
     const newPlayer = new window.Spotify.Player({
       name: 'Playlist Chat Rooms Player',
-      getOAuthToken: getOAuthToken,
-      volume: 0.5,
+      getOAuthToken: getOAuthTokenCallback,
+      volume: currentVolumePercent !== null ? currentVolumePercent / 100 : 0.5,
     });
 
-    console.log(`[MusicContext PlayerInitEffect ${effectId}] Attaching listeners to new player.`);
-
     newPlayer.addListener('ready', async ({ device_id }) => {
-      console.log(
-        `[MusicContext PlayerInitEffect ${effectId}] Player ready. Device ID: ${device_id}`
-      );
+      if (playerRef.current !== null && playerRef.current !== newPlayer) {
+        if (typeof newPlayer.disconnect === 'function') newPlayer.disconnect();
+        return;
+      }
       setDeviceId(device_id);
       setIsReady(true);
       setError(null);
       try {
-        const volume = await newPlayer.getVolume();
-        setCurrentVolumePercent(Math.round(volume * 100));
-        setPreMuteVolume(volume);
+        const vol = await newPlayer.getVolume();
+        setCurrentVolumePercent(Math.round(vol * 100));
+        setPreMuteVolume(vol);
       } catch (e) {
-        console.error(
-          `[MusicContext PlayerInitEffect ${effectId}] Error getting initial volume:`,
-          e
-        );
+        console.error('Error getting vol on ready:', e);
       }
-      newPlayer.getCurrentState().then((initialStateFromGet) => {
-        if (initialStateFromGet) {
-          setPlaybackState(initialStateFromGet);
-        }
-      });
+      newPlayer.getCurrentState().then(setPlaybackState);
     });
 
     newPlayer.addListener('not_ready', ({ device_id }) => {
-      console.log(
-        `[MusicContext PlayerInitEffect ${effectId}] Device ID has gone offline: ${device_id}`
-      );
+      if (playerRef.current !== null && playerRef.current !== newPlayer) return;
+      console.log('[MusicContext] Device ID has gone offline:', device_id);
       setIsReady(false);
       setDeviceId(null);
       lastProcessedTrackIdRef.current = null;
     });
 
-    newPlayer.addListener('player_state_changed', async (sdkPlaybackState) => {
-      // Check if this player instance is still the active one in the context
-      if (playerRef.current !== newPlayer) {
-        console.warn(
-          `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] Event from a stale or disconnected player instance. Ignoring.`
-        );
-        return;
+    newPlayer.addListener('player_state_changed', async (sdkState) => {
+      if (playerRef.current !== newPlayer) return;
+      if (sdkState) {
+        setTrackPositionMs(sdkState.position);
+        setTrackDurationMs(sdkState.duration);
+      } else {
+        setTrackPositionMs(null);
+        setTrackDurationMs(null);
       }
-
-      if (!sdkPlaybackState) {
-        console.warn(
-          `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] State is null. Clearing playbackState.`
-        );
+      if (!sdkState) {
         setPlaybackState(null);
         lastProcessedTrackIdRef.current = null;
         return;
       }
-      const currentSdkTrack = sdkPlaybackState.track_window.current_track;
+      const currentSdkTrack = sdkState.track_window.current_track;
       const currentSdkTrackId = currentSdkTrack?.id;
+      setPlaybackState(sdkState);
+
+      if (currentSdkTrackId && lastProcessedTrackIdRef.current !== currentSdkTrackId) {
+        lastProcessedTrackIdRef.current = currentSdkTrackId;
+      }
       if (!currentSdkTrackId) {
-        console.log(
-          `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] No track ID. Updating state.`
-        );
-        setPlaybackState(sdkPlaybackState);
         lastProcessedTrackIdRef.current = null;
-        return;
       }
-      if (currentSdkTrackId === lastProcessedTrackIdRef.current) {
-        setPlaybackState(sdkPlaybackState);
-        return;
-      }
-      lastProcessedTrackIdRef.current = currentSdkTrackId;
-      const currentToken = tokenRef.current;
-      if (!currentToken) {
-        console.error(
-          `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] No token for track ${currentSdkTrackId}`
-        );
-        setPlaybackState(sdkPlaybackState);
-        return;
-      }
-      try {
-        const resolvedTrackInfoFromAPI: SpotifyApiTrackFull | null = await fetchSpotifyTrackAPI(
-          currentToken,
-          currentSdkTrackId
-        );
-        if (resolvedTrackInfoFromAPI === undefined) {
-          console.log('resolvedTrackInfoFromAPI is undefined, this should not happen');
-        }
 
-        if (resolvedTrackInfoFromAPI) {
-          if (resolvedTrackInfoFromAPI.is_playable) {
-            const finalTrackForState = mapApiTrackToSdkTrack(resolvedTrackInfoFromAPI);
-            if (
-              resolvedTrackInfoFromAPI.linked_from &&
-              resolvedTrackInfoFromAPI.id !== currentSdkTrackId
-            ) {
-              toast.info(
-                `Track "${currentSdkTrack.name}" relinked to: ${resolvedTrackInfoFromAPI.name}`
-              );
-            }
-
-            const updatedPlaybackState: Spotify.PlaybackState = {
-              ...sdkPlaybackState,
-              track_window: { ...sdkPlaybackState.track_window, current_track: finalTrackForState },
-            };
-            setPlaybackState(updatedPlaybackState);
-          } else {
-            const trackName = resolvedTrackInfoFromAPI.name || currentSdkTrack.name;
-            const reason = resolvedTrackInfoFromAPI.restrictions?.reason;
-            const message = `Track "${trackName}" is not available${reason ? ` (${reason})` : ''}.`;
-            toast.error(message);
-            setError(message);
-            playerRef.current
-              ?.nextTrack()
-              .catch((e) => console.error('Error skipping unplayable track:', e));
-          }
-        } else {
-          setPlaybackState(sdkPlaybackState);
-        }
-      } catch (error) {
-        console.error(
-          `[MusicContext PlayerInitEffect ${effectId}][player_state_changed] Error fetching track ${currentSdkTrackId}:`,
-          error
-        );
-        setPlaybackState(sdkPlaybackState);
+      const shouldCheckSaved = currentSdkTrackId && !sdkState.paused;
+      if (shouldCheckSaved) checkIfTrackIsSaved(currentSdkTrackId);
+      if (sdkState.context?.uri !== playbackState?.context?.uri) {
+        if (sdkState.context?.uri?.startsWith('spotify:playlist:'))
+          checkIfPlaylistIsFollowed(sdkState.context.uri.split(':')[2]);
+        else setIsCurrentPlaylistFollowed(null);
       }
     });
 
     newPlayer.addListener('initialization_error', ({ message }) => {
-      console.error(`[MusicContext PlayerInitEffect ${effectId}] Initialization Error:`, message);
-      setError(`Initialization Error: ${message}`);
+      setError(`Init Error: ${message}`);
       setIsReady(false);
     });
-
-    newPlayer.addListener('authentication_error', async ({ message }) => {
-      console.error(`[MusicContext PlayerInitEffect ${effectId}] Authentication Error:`, message);
-      setError(
-        'Spotify authentication error. Your session might be invalid. Please try signing out and in again.'
-      );
-      if (playerRef.current) {
-        playerRef.current.disconnect();
-      }
+    newPlayer.addListener('authentication_error', ({ message }) => {
+      console.error('[MusicContext] Authentication Error:', message);
+      setError(`Spotify authentication error: ${message}. Please try signing out and in again.`);
+      if (playerRef.current) playerRef.current.disconnect();
       setPlayer(null);
       playerRef.current = null;
       setIsReady(false);
@@ -758,158 +609,179 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       setDeviceId(null);
     });
     newPlayer.addListener('account_error', ({ message }) => {
-      console.error(`[MusicContext PlayerInitEffect ${effectId}] Account Error:`, message);
-      setError(`Spotify account error: ${message}.`);
+      setError(`Account Error: ${message}`);
       toast.error(`Spotify account error: ${message}`);
     });
     newPlayer.addListener('playback_error', ({ message }) => {
-      console.error(`[MusicContext PlayerInitEffect ${effectId}] Playback Error:`, message);
-      setError(`Spotify playback error: ${message}`);
+      setError(`Playback Error: ${message}`);
       toast.error(`Spotify playback error: ${message}`);
+      console.log(`[MusicContext Playback Error] UserID: ${getUserId()}`);
     });
 
-    console.log(`[MusicContext PlayerInitEffect ${effectId}] Connecting new player.`);
     newPlayer
       .connect()
-      .then((success) => {
-        if (success) {
-          console.log(`[MusicContext PlayerInitEffect ${effectId}] Player connected successfully.`);
-        }
-      })
-      .catch((err) => {
-        console.error(`[MusicContext PlayerInitEffect ${effectId}] Error connecting player:`, err);
-        setError(`Error connecting: ${err instanceof Error ? err.message : String(err)}`);
-      });
-
+      .catch((err) =>
+        setError(`Connect Error: ${err instanceof Error ? err.message : String(err)}`)
+      );
     setPlayer(newPlayer);
     playerRef.current = newPlayer;
-
-    newPlayer.getCurrentState().then((initialPlayerState) => {
-      if (initialPlayerState) {
-        newPlayer
-          .getVolume()
-          .then((volume) => {
-            setCurrentVolumePercent(Math.round(volume * 100));
-            setPreMuteVolume(volume);
-          })
-          .catch((e) =>
-            console.error(
-              `[MusicContext PlayerInitEffect ${effectId}] Error getting volume on connect:`,
-              e
-            )
-          );
-      }
+    newPlayer.getCurrentState().then((pState) => {
+      if (pState)
+        newPlayer.getVolume().then((vol) => {
+          setCurrentVolumePercent(Math.round(vol * 100));
+          setPreMuteVolume(vol);
+        });
     });
 
     return () => {
-      console.log(`[MusicContext PlayerInitEffect ${effectId}] Cleanup. Disconnecting player.`);
       if (playerRef.current) {
-        playerRef.current.disconnect();
+        if (typeof playerRef.current.disconnect === 'function') playerRef.current.disconnect();
       }
       setPlayer(null);
       playerRef.current = null;
       setIsReady(false);
+      setDeviceId(null);
+      setPlaybackState(null);
     };
-  }, [sdkReady, getOAuthToken, userSession.isLoading, userSession.spotifyToken, isDisabled]);
+  }, [isDisabled, sdkReady, isTokenManagerReady, currentVolumePercent]);
 
+  // SDK Ready Effect
   useEffect(() => {
-    if (isDisabled) return; // Prevent playlist fetching if disabled
-    // The call to fetch dynamic playlists will be handled by another useEffect
-    // that depends on user session, SDK readiness, etc.
+    if (isDisabled) return;
+    window.onSpotifyWebPlaybackSDKReady = () => setSdkReady(true);
+    return () => {
+      if (!isDisabled) window.onSpotifyWebPlaybackSDKReady = () => {};
+    };
   }, [isDisabled]);
 
-  // Effect to trigger fetching taste-matched playlists
+  // Track Progression Interval Effect
   useEffect(() => {
-    if (isDisabled || !isReady || !deviceId || !userSession.spotifyToken || !userSession.userId) {
-      // console.log(
-      //   '[MusicContext PlaylistFetchEffect] Conditions NOT YET MET for fetching playlists or provider disabled.',
-      //   { isDisabled, isReady, deviceId, token: !!userSession.spotifyToken, userId: !!userSession.userId }
-      // );
-      return;
+    if (playbackState && !playbackState.paused && playerRef.current) {
+      if (trackProgressionIntervalRef.current) clearInterval(trackProgressionIntervalRef.current);
+      trackProgressionIntervalRef.current = setInterval(async () => {
+        if (playerRef.current) {
+          try {
+            const cState = await playerRef.current.getCurrentState();
+            if (cState) setTrackPositionMs(cState.position);
+            else {
+              if (trackProgressionIntervalRef.current)
+                clearInterval(trackProgressionIntervalRef.current);
+              trackProgressionIntervalRef.current = null;
+              setTrackPositionMs(null);
+            }
+          } catch (e) {
+            console.error('[MusicContext] Error getting current state in interval:', e);
+            if (trackProgressionIntervalRef.current)
+              clearInterval(trackProgressionIntervalRef.current);
+            trackProgressionIntervalRef.current = null;
+            setError('Failed to sync track position.');
+          }
+        }
+      }, 500);
+    } else {
+      if (trackProgressionIntervalRef.current) clearInterval(trackProgressionIntervalRef.current);
+      trackProgressionIntervalRef.current = null;
     }
-    console.log(
-      '[MusicContext PlaylistFetchEffect] Conditions met, calling fetchAndSetTasteMatchedPlaylists.'
-    );
-    fetchAndSetTasteMatchedPlaylists().catch((err) => {
-      console.error(
-        '[MusicContext PlaylistFetchEffect] Unhandled error calling fetchAndSetTasteMatchedPlaylists:',
-        err
-      );
-    });
-  }, [
-    isDisabled,
-    isReady,
-    deviceId,
-    userSession.spotifyToken,
-    userSession.userId,
-    fetchAndSetTasteMatchedPlaylists,
-  ]);
+    return () => {
+      if (trackProgressionIntervalRef.current) clearInterval(trackProgressionIntervalRef.current);
+    };
+  }, [playbackState]);
 
-  // Effect to auto-play the first taste-matched playlist
+  // Fetch Taste-Matched Playlists Effect
+  useEffect(() => {
+    if (isDisabled || !isReady || !deviceId || !isTokenManagerReady || !isAuthenticated()) return;
+    fetchAndSetTasteMatchedPlaylists().catch((err) =>
+      console.error('Error fetching playlists:', err)
+    );
+  }, [isDisabled, isReady, deviceId, isTokenManagerReady, fetchAndSetTasteMatchedPlaylists]);
+
+  // Auto-Play First Playlist Effect
   useEffect(() => {
     if (
       isDisabled ||
       !isReady ||
       !deviceId ||
-      !userSession.spotifyToken ||
+      !isTokenManagerReady ||
       tasteMatchedPlaylists.length === 0 ||
       currentPlaylistIndex !== null ||
       initialPlaylistAutoPlayedRef.current ||
-      typeof playPlaylist !== 'function'
-    ) {
+      typeof playPlaylist !== 'function' ||
+      !isAuthenticated()
+    )
       return;
-    }
-    console.log(
-      '[MusicContext AutoPlayEffect] Conditions met, attempting to play initial playlist.'
-    );
     playPlaylist(tasteMatchedPlaylists[0], 0)
       .then(() => {
-        console.log('[MusicContext AutoPlayEffect] Initial playlist playback started.');
         initialPlaylistAutoPlayedRef.current = true;
       })
       .catch((err) => {
-        console.error('[MusicContext AutoPlayEffect] Error auto-playing initial playlist:', err);
+        console.error('Error auto-playing:', err);
         initialPlaylistAutoPlayedRef.current = true;
       });
   }, [
     isDisabled,
     isReady,
     deviceId,
-    userSession.spotifyToken,
+    isTokenManagerReady,
     tasteMatchedPlaylists,
     currentPlaylistIndex,
     playPlaylist,
   ]);
 
+  // Debounced Save/Follow Checks Effect
   useEffect(() => {
-    if (isDisabled) return;
-
-    const currentTrackId = playbackState?.track_window?.current_track?.id;
-    const contextUri = playbackState?.context?.uri;
-    const currentPlaylistId = contextUri?.startsWith('spotify:playlist:')
-      ? contextUri.split(':')[2]
+    if (isDisabled || !isTokenManagerReady) {
+      if (debouncedTrackCheckRef.current) clearTimeout(debouncedTrackCheckRef.current);
+      if (debouncedPlaylistCheckRef.current) clearTimeout(debouncedPlaylistCheckRef.current);
+      setIsCurrentTrackSaved(null);
+      setIsCurrentPlaylistFollowed(null);
+      return;
+    }
+    const trackId = playbackState?.track_window?.current_track?.id;
+    const playlistCtxUri = playbackState?.context?.uri;
+    const playlistId = playlistCtxUri?.startsWith('spotify:playlist:')
+      ? playlistCtxUri.split(':')[2]
       : null;
 
-    if (currentTrackId) checkIfTrackIsSaved(currentTrackId).catch(console.error);
-    else setIsCurrentTrackSaved(null);
+    if (debouncedTrackCheckRef.current) clearTimeout(debouncedTrackCheckRef.current);
+    if (trackId) {
+      debouncedTrackCheckRef.current = setTimeout(
+        () => checkIfTrackIsSaved(trackId).catch(console.error),
+        DEBOUNCE_DELAY_MS
+      );
+    } else {
+      setIsCurrentTrackSaved(null);
+    }
+    if (debouncedPlaylistCheckRef.current) clearTimeout(debouncedPlaylistCheckRef.current);
+    if (playlistId) {
+      debouncedPlaylistCheckRef.current = setTimeout(
+        () => checkIfPlaylistIsFollowed(playlistId).catch(console.error),
+        DEBOUNCE_DELAY_MS
+      );
+    } else {
+      setIsCurrentPlaylistFollowed(null);
+    }
+    return () => {
+      if (debouncedTrackCheckRef.current) clearTimeout(debouncedTrackCheckRef.current);
+      if (debouncedPlaylistCheckRef.current) clearTimeout(debouncedPlaylistCheckRef.current);
+    };
+  }, [
+    playbackState,
+    checkIfTrackIsSaved,
+    checkIfPlaylistIsFollowed,
+    isDisabled,
+    isTokenManagerReady,
+    DEBOUNCE_DELAY_MS,
+  ]);
 
-    if (currentPlaylistId) checkIfPlaylistIsFollowed(currentPlaylistId).catch(console.error);
-    else setIsCurrentPlaylistFollowed(null);
-  }, [playbackState, checkIfTrackIsSaved, checkIfPlaylistIsFollowed, isDisabled]);
-
+  // Main Initialization Effect (Token Manager and User Session)
   useEffect(() => {
+    let userSessionCleanup: (() => void) | null = null;
+
     if (isDisabled) {
-      // If disabled, reset all relevant states to their initial/inert values.
-      setUserSession({
-        spotifyToken: null,
-        userSpotifyId: null,
-        userId: null,
-        isLoading: false, // Not loading if disabled.
-        error: null,
-      });
-      tokenRef.current = null;
+      setIsTokenManagerReady(false);
+      setUserSession({ userSpotifyId: null, userId: null, isLoading: false, error: null });
       if (playerRef.current) {
-        playerRef.current.disconnect();
+        if (typeof playerRef.current.disconnect === 'function') playerRef.current.disconnect();
         setPlayer(null);
         playerRef.current = null;
       }
@@ -917,7 +789,6 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       setPlaybackState(null);
       setDeviceId(null);
       setCurrentVolumePercent(50);
-      setError(null);
       setTasteMatchedPlaylists([]);
       setCurrentPlaylistIndex(null);
       setCurrentPlaylistName(null);
@@ -925,77 +796,69 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       setIsCurrentPlaylistFollowed(null);
       initialPlaylistAutoPlayedRef.current = false;
       lastProcessedTrackIdRef.current = null;
-      // No new subscriptions to set up, so no specific cleanup function needed from this path.
       return;
     }
 
-    console.log(
-      '[MusicContext UserSessionEffect] Initializing and subscribing to user session changes (since not disabled).'
-    );
-    const cleanupFromInitializeUserSession = initializeUserSession(); // From user-session.ts
+    initializeTokenManager(); // Idempotent
+    ensureTokenManagerInitialized()
+      .then(() => {
+        setIsTokenManagerReady(true);
+        console.log('[MusicContext] Token manager is initialized.');
 
-    const unsubscribeFromMusicContextListener = subscribeToUserSession((newSessionState) => {
-      setUserSession(newSessionState);
-      tokenRef.current = newSessionState.spotifyToken;
-
-      const sessionError = newSessionState.error;
-      const isExpectedError =
-        sessionError === 'Auth session missing!' ||
-        sessionError === 'Spotify token not available from session.';
-      const isActualError = sessionError && !isExpectedError;
-
-      setError((prevError) => {
-        if (isActualError) {
-          if (prevError !== sessionError) {
-            console.warn('[MusicContext] User session has an unexpected error:', sessionError);
-            return sessionError;
+        // Initialize user session after token manager is confirmed ready
+        const cleanupUserSess = initializeUserSession();
+        const unsubscribeUserSess = subscribeToUserSession((newSessionState) => {
+          setUserSession((prevState) => {
+            if (
+              newSessionState.isLoading &&
+              newSessionState.userId === null &&
+              prevState.userId !== null
+            ) {
+              return {
+                ...newSessionState,
+                userId: prevState.userId,
+                userSpotifyId: prevState.userSpotifyId,
+              };
+            }
+            return newSessionState;
+          });
+          const sessionErr = newSessionState.error;
+          const expectedErr = sessionErr === 'User session missing.';
+          const actualErr = sessionErr && !expectedErr;
+          setError((prevErr) => {
+            if (actualErr) return prevErr !== sessionErr ? sessionErr : prevErr;
+            if (prevErr !== null && (sessionErr === null || expectedErr)) return null;
+            return prevErr;
+          });
+          if (sessionErr === 'User session missing.' && !isAuthenticated()) {
+            if (playerRef.current && typeof playerRef.current.disconnect === 'function')
+              playerRef.current.disconnect();
+            setPlayer(null);
+            playerRef.current = null;
+            setIsReady(false);
+            setPlaybackState(null);
+            setDeviceId(null);
+            // Reset other states as well
           }
-        } else {
-          if (prevError !== null) {
-            console.log(
-              '[MusicContext] Clearing its own error state as user session error is null or expected.'
-            );
-            return null;
-          }
-        }
-        return prevError; // No change to error state
+        });
+        userSessionCleanup = () => {
+          cleanupUserSess();
+          unsubscribeUserSess();
+        };
+      })
+      .catch((err) => {
+        console.error('[MusicContext] Failed to initialize token manager:', err);
+        setError('Music services failed to start.');
+        setIsTokenManagerReady(false);
       });
 
-      if (!newSessionState.isLoading && !newSessionState.spotifyToken) {
-        console.log(
-          '[MusicContext UserSessionEffect] Token lost or user signed out. Cleaning up MusicContext state.'
-        );
-        if (playerRef.current) {
-          playerRef.current.disconnect();
-          setPlayer(null);
-          playerRef.current = null;
-        }
-        setIsReady(false);
-        setPlaybackState(null);
-        setDeviceId(null);
-        setCurrentVolumePercent(50);
-        // setError(null); // Handled by the logic above based on newSessionState.error
-        setTasteMatchedPlaylists([]);
-        setCurrentPlaylistIndex(null);
-        setCurrentPlaylistName(null);
-        setIsCurrentTrackSaved(null);
-        setIsCurrentPlaylistFollowed(null);
-        initialPlaylistAutoPlayedRef.current = false;
-        lastProcessedTrackIdRef.current = null;
-      }
-    });
-
-    // This is the cleanup function for the effect when isDisabled is false
     return () => {
-      console.log(
-        '[MusicContext UserSessionEffect] Cleaning up user session subscriptions (due to unmount or isDisabled change).'
-      );
-      cleanupFromInitializeUserSession();
-      unsubscribeFromMusicContextListener();
+      console.log('[MusicContext] Main init effect cleanup.');
+      if (userSessionCleanup) userSessionCleanup();
+      setIsTokenManagerReady(false);
     };
-  }, [isDisabled]); // Dependency array only contains isDisabled
+  }, [isDisabled]);
 
-  // Conditionally provide the active context or the initial (inert) state
   const contextValue: MusicContextState = isDisabled
     ? initialState
     : {
@@ -1005,20 +868,23 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         playbackState,
         currentVolumePercent,
         error,
+        userSpotifyId: userSession.userSpotifyId,
+        tasteMatchedPlaylists,
+        currentPlaylistIndex,
+        currentPlaylistName,
+        isCurrentTrackSaved,
+        isCurrentPlaylistFollowed,
+        trackPositionMs,
+        trackDurationMs,
+        seek,
         nextTrack,
         previousTrack,
         setVolume,
         toggleMute,
         toggleShuffle,
-        tasteMatchedPlaylists,
-        currentPlaylistIndex,
-        currentPlaylistName,
         playPlaylist,
         nextPlaylist,
         previousPlaylist,
-        isCurrentTrackSaved,
-        isCurrentPlaylistFollowed,
-        userSpotifyId: userSession.userSpotifyId,
         checkIfTrackIsSaved,
         saveCurrentTrack,
         unsaveCurrentTrack,
@@ -1032,8 +898,6 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
 
 export const useMusic = (): MusicContextState => {
   const context = useContext(MusicContext);
-  if (context === undefined) {
-    throw new Error('useMusic must be used within a MusicProvider');
-  }
+  if (context === undefined) throw new Error('useMusic must be used within a MusicProvider');
   return context;
 };
