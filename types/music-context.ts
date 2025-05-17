@@ -24,12 +24,12 @@ export interface MusicContextState {
   previousTrack: () => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   toggleMute: () => Promise<void>;
-  toggleShuffle: () => Promise<void>;
 
   // Playlist control functions
   playPlaylist: (playlist: Playlist, trackIndex?: number) => Promise<void>;
   nextPlaylist: () => Promise<void>;
   previousPlaylist: () => Promise<void>;
+  playPlaylistWithCustomShuffle: (playlist: Playlist, trackIndex?: number) => Promise<void>;
 
   // Save/Follow Check/Action Methods
   checkIfTrackIsSaved: (trackId: string) => Promise<void>;

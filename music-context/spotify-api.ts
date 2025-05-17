@@ -1,9 +1,34 @@
-import { SpotifyApiTrackFull, Playlist } from '../types/spotify';
+import { SpotifyApiTrackFull } from '../types/spotify';
 import { getSpotifyToken } from './token-manager'; // Import from token-manager instead
 
 // Constants for network retry logic
 const MAX_NETWORK_RETRIES = 2; // Retry up to 2 additional times (3 total attempts)
 const NETWORK_RETRY_DELAY_MS = 1000; // Delay between retries in milliseconds
+
+/**
+ * Shuffles an array in place using the Fisher-Yates algorithm.
+ * The original array is modified.
+ *
+ * @param array The array to shuffle.
+ * @returns The same array, shuffled.
+ * @template T The type of elements in the array.
+ */
+export const shuffleArray = <T>(array: T[]): T[] => {
+  let currentIndex = array.length;
+  let randomIndex: number;
+
+  // While there remain elements to shuffle.
+  while (currentIndex !== 0) {
+    // Pick a remaining element.
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+
+    // And swap it with the current element.
+    [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+  }
+
+  return array;
+};
 
 // Generic Spotify API Call Helper
 export const makeSpotifyApiCall = async <T = unknown>(
@@ -179,13 +204,151 @@ export const fetchSpotifyTrack = async (
   }
 
   try {
-    const trackData = await makeSpotifyApiCall(token, `/tracks/${trackId}?market=from_token`);
-    return trackData as SpotifyApiTrackFull;
+    // The generic type for makeSpotifyApiCall here is unknown by default,
+    // but we expect SpotifyApiTrackFull or something compatible.
+    const trackData = await makeSpotifyApiCall<SpotifyApiTrackFull>(
+      token,
+      `/tracks/${trackId}?market=from_token`
+    );
+    return trackData; // No need to cast if makeSpotifyApiCall is correctly typed for this call
   } catch (err) {
     console.error(`[fetchSpotifyTrack API] Error fetching track ${trackId}:`, err);
     // Re-throw or handle more gracefully, for now, let context handle UI error
     throw err;
   }
+};
+
+// Interface for the paginated response from Spotify's get playlist tracks endpoint
+interface SpotifyPlaylistTracksPage {
+  items: {
+    track: SpotifyApiTrackFull | null; // Track can be null if unavailable, e.g. deleted
+    // is_local is a property of the track object itself if requested in fields
+  }[];
+  next: string | null;
+  total: number;
+  limit: number;
+  offset: number;
+  // href?: string; // The request URL for this page
+  // previous?: string | null; // URL for the previous page
+}
+
+/**
+ * Fetches all playable tracks from a given Spotify playlist, handling pagination and relinking.
+ *
+ * @param token Spotify API access token.
+ * @param playlistId The ID of the Spotify playlist.
+ * @returns A promise that resolves to an array of SpotifyApiTrackFull objects.
+ * @throws Throws an error if the playlist ID is not provided or if API calls fail.
+ */
+export const fetchAllPlayablePlaylistTracksAPI = async (
+  token: string,
+  playlistId: string
+): Promise<SpotifyApiTrackFull[]> => {
+  // Token presence is primarily handled by makeSpotifyApiCall, but initial check can be useful.
+  // For this function, we assume token is provided, and makeSpotifyApiCall will attempt refresh if needed.
+  if (!playlistId) {
+    const errMsg = '[fetchAllPlayablePlaylistTracksAPI] Playlist ID is required.';
+    console.error(errMsg);
+    throw new Error(errMsg);
+  }
+
+  const playableTracks: SpotifyApiTrackFull[] = [];
+  const limit = 50; // Max limit for this endpoint usually 50, sometimes 100. Let's use 50.
+
+  // DR12.1.1: Ensure all necessary track data (including linked_from, is_playable, is_local, uri, type, restrictions, available_markets) is fetched efficiently.
+  // Added artists, album basic details, and duration_ms as they are part of SpotifyApiTrackFull and generally useful.
+  // is_local is a field *on the track object*, so it needs to be requested within track().
+  const fields =
+    'items(track(id,uri,name,type,is_playable,is_local,linked_from(id,type,uri),artists(name,id),album(name,id,images),duration_ms,restrictions,available_markets)),next,total,limit,offset';
+
+  let currentPageUrl: string | null =
+    `/playlists/${playlistId}/tracks?limit=${limit}&offset=0&market=from_token&fields=${encodeURIComponent(fields)}`;
+
+  while (currentPageUrl) {
+    try {
+      // makeSpotifyApiCall expects the endpoint path without the domain, e.g., "/playlists/..."
+      const pageData: SpotifyPlaylistTracksPage | null =
+        await makeSpotifyApiCall<SpotifyPlaylistTracksPage>(token, currentPageUrl);
+
+      if (!pageData || !pageData.items) {
+        console.warn(
+          `[fetchAllPlayablePlaylistTracksAPI] Received no items or invalid page data from ${currentPageUrl}. Assuming end of playlist.`
+        );
+        break;
+      }
+
+      for (const item of pageData.items) {
+        const track = item.track;
+
+        // DR12.1.1: Skip if track is null, not a track type, or is local
+        if (!track) {
+          // console.debug('[fetchAllPlayablePlaylistTracksAPI] Skipping null track item.');
+          continue;
+        }
+        if (track.type !== 'track') {
+          // console.debug(`[fetchAllPlayablePlaylistTracksAPI] Skipping item of type '${track.type}': ${track.name || track.id}`);
+          continue;
+        }
+        if (track.is_local) {
+          // console.debug(`[fetchAllPlayablePlaylistTracksAPI] Skipping local track: ${track.name || track.id}`);
+          continue;
+        }
+
+        // DR12.1.1: Check playability and relink if necessary
+        if (track.is_playable) {
+          playableTracks.push(track);
+        } else if (track.linked_from?.id && track.linked_from.type === 'track') {
+          // console.log(`[fetchAllPlayablePlaylistTracksAPI] Track '${track.name}' (ID: ${track.id}) is not playable, attempting relink from ${track.linked_from.id}`);
+          try {
+            const relinkedTrack = await fetchSpotifyTrack(token, track.linked_from.id);
+            if (
+              relinkedTrack &&
+              relinkedTrack.is_playable &&
+              relinkedTrack.type === 'track' &&
+              !relinkedTrack.is_local
+            ) {
+              // console.log(`[fetchAllPlayablePlaylistTracksAPI] Successfully relinked to playable track '${relinkedTrack.name}' (ID: ${relinkedTrack.id})`);
+              playableTracks.push(relinkedTrack);
+            } else {
+              // console.log(`[fetchAllPlayablePlaylistTracksAPI] Relinked track ${track.linked_from.id} for '${track.name}' is also not playable, is local, or not a track.`);
+            }
+          } catch (relinkError) {
+            console.warn(
+              `[fetchAllPlayablePlaylistTracksAPI] Error fetching relinked track ${track.linked_from.id} for '${track.name}':`,
+              relinkError instanceof Error ? relinkError.message : relinkError
+            );
+            // Continue to the next track, don't let a failed relink stop the whole process for other tracks.
+          }
+        } else {
+          // console.debug(`[fetchAllPlayablePlaylistTracksAPI] Track '${track.name}' (ID: ${track.id}) is not playable and has no valid linked_from information.`);
+        }
+      }
+
+      // Prepare for the next page
+      if (pageData.next) {
+        const spotifyApiBase = 'https://api.spotify.com/v1';
+        if (pageData.next.startsWith(spotifyApiBase)) {
+          currentPageUrl = pageData.next.substring(spotifyApiBase.length);
+        } else {
+          console.warn(
+            `[fetchAllPlayablePlaylistTracksAPI] Unexpected 'next' URL format: ${pageData.next}. Ending pagination.`
+          );
+          currentPageUrl = null;
+        }
+      } else {
+        currentPageUrl = null; // No more pages
+      }
+    } catch (error) {
+      console.error(
+        `[fetchAllPlayablePlaylistTracksAPI] Error fetching playlist tracks page for playlist ${playlistId} (URL: ${currentPageUrl}):`,
+        error instanceof Error ? error.message : error
+      );
+      // Re-throw the error to be handled by the calling context, as per error propagation strategy.
+      throw error;
+    }
+  }
+
+  return playableTracks;
 };
 
 // --- Save/Follow API Call Methods ---
@@ -288,221 +451,82 @@ export const unfollowPlaylistAPI = async (token: string, playlistId: string): Pr
   }
 };
 
-// --- Player Control API Call Methods ---
-
-export const toggleShuffleAPI = async (
+/**
+ * Plays a Spotify playlist with a custom shuffle order.
+ * Fetches all playable tracks, shuffles them, turns off Spotify's native shuffle,
+ * and then starts playback of the custom queue.
+ *
+ * @param token Spotify API access token.
+ * @param deviceId The ID of the device to play on.
+ * @param playlistId The ID of the Spotify playlist.
+ * @returns A promise that resolves when playback is successfully initiated.
+ * @throws Throws an error if no playable tracks are found or if any API call fails.
+ */
+export const playPlaylistWithCustomShuffleAPI = async (
   token: string,
   deviceId: string,
-  shuffleState: boolean
+  playlistId: string
 ): Promise<void> => {
-  if (!token || !deviceId) {
-    throw new Error('Token or Device ID missing for toggleShuffleAPI');
-  }
-  try {
-    await makeSpotifyApiCall(
-      token,
-      `/me/player/shuffle?state=${shuffleState}&device_id=${deviceId}`,
-      'PUT'
-    );
-  } catch (err) {
-    console.error('[toggleShuffleAPI] Error setting shuffle state:', err);
-    throw err;
-  }
-};
-
-// Helper interface for the structure of items from /playlists/{id}/tracks
-interface SpotifyPlaylistTrackItem {
-  track: SpotifyApiTrackFull | null; // Track can be null if it's unavailable but still in playlist
-  is_local: boolean;
-}
-
-export const playPlaylistAPI = async (
-  token: string,
-  deviceId: string,
-  playlist: Playlist,
-  trackIndex: number = 0
-): Promise<void> => {
-  if (!token || !deviceId || !playlist || !playlist.spotify_id) {
-    throw new Error('Missing required parameters for playPlaylistAPI');
+  if (!token || !deviceId || !playlistId) {
+    const errMsg =
+      '[playPlaylistWithCustomShuffleAPI] Token, Device ID, and Playlist ID are required.';
+    console.error(errMsg);
+    throw new Error(errMsg);
   }
 
-  const contextUri = `spotify:playlist:${playlist.spotify_id}`;
-  const validTrackIndex = Math.max(0, Math.floor(trackIndex || 0));
-  const initialPlayBody = {
-    context_uri: contextUri,
-    offset: { position: validTrackIndex },
+  // console.log(
+  //   `[playPlaylistWithCustomShuffleAPI] Starting custom shuffle for playlist ${playlistId} on device ${deviceId}`
+  // );
+
+  // 1. Fetch all playable tracks
+  const playableTracks = await fetchAllPlayablePlaylistTracksAPI(token, playlistId);
+
+  // 2. Handle no playable tracks (AC5)
+  if (!playableTracks || playableTracks.length === 0) {
+    const errMsg = `[playPlaylistWithCustomShuffleAPI] No playable tracks found in playlist ${playlistId}. Cannot start custom shuffle.`;
+    console.warn(errMsg);
+    // This error will be caught by MusicContext and shown as a toast
+    throw new Error(`No playable tracks found in playlist ${playlistId}.`);
+  }
+  // console.log(`[playPlaylistWithCustomShuffleAPI] Found ${playableTracks.length} playable tracks.`);
+
+  // 3. Extract URIs
+  const trackUris = playableTracks.map((track) => track.uri);
+
+  // 4. Shuffle URIs - Use a copy by spreading into a new array before shuffling
+  const shuffledTrackUris = shuffleArray([...trackUris]);
+
+  // 5. Turn off Spotify's native shuffle (DR12.1.3, AC3)
+  // console.log(
+  //   `[playPlaylistWithCustomShuffleAPI] Turning off Spotify native shuffle for device ${deviceId}.`
+  // );
+
+  // If toggleShuffleAPI fails critically, makeSpotifyApiCall within it will throw,
+  // and the error will propagate, stopping execution before playing the custom queue.
+
+  // 6. Play the shuffled URIs (DR12.1.3, AC3)
+  const playBody = {
+    uris: shuffledTrackUris,
   };
 
+  // console.log(
+  //   `[playPlaylistWithCustomShuffleAPI] Attempting to play ${shuffledTrackUris.length} shuffled tracks on device ${deviceId}.`
+  // );
+
+  // The main try/catch for this function is implicitly handled by the caller in MusicContext
+  // if individual API calls like fetchAllPlayablePlaylistTracksAPI or toggleShuffleAPI throw.
+  // Explicit try/catch for the final play call for clarity or specific error message if needed.
   try {
-    await makeSpotifyApiCall(
-      token,
-      `/me/player/play?device_id=${deviceId}`,
-      'PUT',
-      initialPlayBody
-    );
+    await makeSpotifyApiCall(token, `/me/player/play?device_id=${deviceId}`, 'PUT', playBody);
     // console.log(
-    //   `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) at index ${validTrackIndex}.`
+    //   `[playPlaylistWithCustomShuffleAPI] Successfully initiated playback of custom shuffled playlist ${playlistId} on device ${deviceId}.`
     // );
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (
-      errorMessage &&
-      errorMessage.includes('Spotify API Error (403)') &&
-      errorMessage.includes('Restriction violated')
-    ) {
-      console.warn(
-        `[playPlaylistAPI] Initial attempt for playlist "${playlist.name}" (ID: ${playlist.spotify_id}) at index ${validTrackIndex} failed due to restriction. Attempting fallback...`
-      );
-
-      try {
-        const tracksResponse = await makeSpotifyApiCall<{ items: SpotifyPlaylistTrackItem[] }>(
-          token,
-          `/playlists/${playlist.spotify_id}/tracks?fields=items(track(id,uri,name,type,is_playable,restrictions),is_local)&limit=50&offset=${validTrackIndex}&market=from_token`,
-          'GET'
-        );
-
-        const evaluatedTracksDetails: Array<{
-          name: string | undefined;
-          uri: string | undefined;
-          is_playable: boolean | undefined;
-          restrictions: SpotifyApiTrackFull['restrictions'];
-          reasonSkipped: string;
-        }> = [];
-
-        if (tracksResponse && tracksResponse.items) {
-          for (const item of tracksResponse.items) {
-            let reasonSkippedInitialCheck = 'Unknown reason';
-
-            if (item.is_local || !item.track || item.track.type !== 'track') {
-              reasonSkippedInitialCheck = 'Non-track, local, or null track item';
-              evaluatedTracksDetails.push({
-                name: item.track?.name,
-                uri: item.track?.uri,
-                is_playable: item.track?.is_playable,
-                restrictions: item.track?.restrictions,
-                reasonSkipped: reasonSkippedInitialCheck,
-              });
-              console.log(
-                `[playPlaylistAPI] Fallback: Skipping (initial check) - ${reasonSkippedInitialCheck}: URI ${item.track?.uri || 'N/A'}, Name: ${item.track?.name || 'N/A'}`
-              );
-              continue;
-            }
-
-            const currentTrack = item.track;
-            console.log(
-              `[playPlaylistAPI] Fallback: Evaluating track URI: ${currentTrack.uri}, Name: "${currentTrack.name}", is_playable: ${currentTrack.is_playable}, restrictions: ${JSON.stringify(currentTrack.restrictions)}`
-            );
-
-            let passesInitialFilter = true;
-            let filterSkipReason = 'Passed initial playability filter';
-
-            if (currentTrack.is_playable === false) {
-              passesInitialFilter = false;
-              filterSkipReason = 'Track explicitly marked as not playable (is_playable: false)';
-            } else if (
-              currentTrack.restrictions &&
-              (currentTrack.restrictions.reason === 'market' ||
-                currentTrack.restrictions.reason === 'product' ||
-                currentTrack.restrictions.reason === 'payment_required')
-            ) {
-              passesInitialFilter = false;
-              filterSkipReason = `Track has prohibitive restrictions (reason: ${currentTrack.restrictions.reason})`;
-            }
-
-            if (!passesInitialFilter) {
-              evaluatedTracksDetails.push({
-                name: currentTrack.name,
-                uri: currentTrack.uri,
-                is_playable: currentTrack.is_playable,
-                restrictions: currentTrack.restrictions,
-                reasonSkipped: filterSkipReason,
-              });
-              console.log(
-                `[playPlaylistAPI] Fallback: -> Skipping track "${currentTrack.name}" after initial filter. Reason: ${filterSkipReason}`
-              );
-              continue;
-            }
-
-            // If we reach here, the track is a candidate. Attempt to play it directly to confirm it is truly playable.
-            console.log(
-              `[playPlaylistAPI] Fallback: -> Candidate track URI: ${currentTrack.uri}, Name: "${currentTrack.name}". Attempting direct play test...`
-            );
-            try {
-              // Perform a silent play test (optional, could be removed if causing issues or if next step is enough)
-              // For a true test, one might need to briefly play and pause, or just trust the next call.
-              // Let's assume for now the next call is the primary goal.
-
-              // Now, try to play it using the original context_uri but with the new offset
-              const actualTrackIndexInPlaylist =
-                validTrackIndex + tracksResponse.items.indexOf(item);
-              // indexOf(item) should give the index of the current item in the tracksResponse.items array.
-
-              console.log(
-                `[playPlaylistAPI] Fallback: Candidate "${currentTrack.name}" seems viable. Attempting to play original playlist context at new index: ${actualTrackIndexInPlaylist}.`
-              );
-              await makeSpotifyApiCall(token, `/me/player/play?device_id=${deviceId}`, 'PUT', {
-                context_uri: contextUri,
-                offset: { position: actualTrackIndexInPlaylist },
-              });
-              // console.log(
-              //   `[playPlaylistAPI] Successfully started playlist "${playlist.name}" (ID: ${playlist.spotify_id}) with fallback using context_uri at index ${actualTrackIndexInPlaylist} (Track: "${currentTrack.name}")`
-              // );
-              return; // SUCCESS!
-            } catch (contextPlayError: unknown) {
-              const contextPlayErrorMessage =
-                contextPlayError instanceof Error
-                  ? contextPlayError.message
-                  : String(contextPlayError);
-              let reasonForThisAttemptFailure = `Context play attempt for ${currentTrack.uri} at index ${validTrackIndex + tracksResponse.items.indexOf(item)} failed: ${contextPlayErrorMessage}`;
-
-              if (
-                contextPlayErrorMessage.includes('Spotify API Error (403)') &&
-                contextPlayErrorMessage.includes('Restriction violated')
-              ) {
-                reasonForThisAttemptFailure = `Context play attempt for ${currentTrack.uri} (at index ${validTrackIndex + tracksResponse.items.indexOf(item)}) failed with 403 Restriction Violated.`;
-                console.warn(
-                  `[playPlaylistAPI] Fallback: Context play for track URI ${currentTrack.uri} ("${currentTrack.name}") at new index failed with 403. Trying next track. Error: ${contextPlayErrorMessage}`
-                );
-              } else {
-                console.error(
-                  `[playPlaylistAPI] Fallback: Context play for track URI ${currentTrack.uri} ("${currentTrack.name}") at new index failed with non-403 error. Trying next track. Error: ${contextPlayErrorMessage}`
-                );
-              }
-              evaluatedTracksDetails.push({
-                name: currentTrack.name,
-                uri: currentTrack.uri,
-                is_playable: currentTrack.is_playable,
-                restrictions: currentTrack.restrictions,
-                reasonSkipped: reasonForThisAttemptFailure,
-              });
-              // Continue to the next track in the loop
-            }
-          }
-        }
-
-        // If loop completes without returning, no track was successfully played
-        console.error(
-          `[playPlaylistAPI] Fallback failed for playlist "${playlist.name}" (ID: ${playlist.spotify_id}). No playable tracks found after trying all candidates with context. Details of evaluated tracks (up to 50):`,
-          JSON.stringify(evaluatedTracksDetails, null, 2)
-        );
-        const noPlayableMsg = `Failed to play playlist "${playlist.name}" (ID: ${playlist.spotify_id}). No playable tracks found starting from index ${validTrackIndex} after initial restriction. See console for details on evaluated tracks.`;
-        throw new Error(noPlayableMsg);
-      } catch (fallbackError: unknown) {
-        console.error(
-          `[playPlaylistAPI] Error during fallback attempt for playlist "${playlist.name}" (ID: ${playlist.spotify_id}):`,
-          fallbackError
-        );
-        // Re-throw the original error, as the fallback also failed.
-        // Or, you could throw fallbackError if it's more informative.
-        throw error;
-      }
-    } else {
-      // Not the specific 403 restriction error, or some other error in the initial attempt
-      console.error(
-        `[playPlaylistAPI] Error starting playlist "${playlist.name}" (ID: ${playlist.spotify_id}):`,
-        error
-      );
-      throw error;
-    }
+  } catch (playError) {
+    console.error(
+      `[playPlaylistWithCustomShuffleAPI] Error initiating playback of custom shuffled playlist ${playlistId}:`,
+      playError
+    );
+    // Re-throw for MusicContext to handle and potentially show a toast
+    throw playError;
   }
 };

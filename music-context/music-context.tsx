@@ -22,8 +22,7 @@ import {
   checkIfPlaylistIsFollowedAPI,
   followPlaylistAPI,
   unfollowPlaylistAPI,
-  toggleShuffleAPI,
-  playPlaylistAPI,
+  playPlaylistWithCustomShuffleAPI,
 } from './spotify-api';
 
 // Import the NEW Server Action
@@ -59,10 +58,11 @@ const initialState: MusicContextState = {
   previousTrack: async () => console.warn('Previous track not available.'),
   setVolume: async () => console.warn('Set volume not available.'),
   toggleMute: async () => console.warn('Toggle mute not available.'),
-  toggleShuffle: async () => console.warn('Toggle shuffle not available.'),
   playPlaylist: async () => console.warn('Play playlist not available.'),
   nextPlaylist: async () => console.warn('Next playlist not available.'),
   previousPlaylist: async () => console.warn('Previous playlist not available.'),
+  playPlaylistWithCustomShuffle: async () =>
+    console.warn('Play with custom shuffle not available.'),
   checkIfTrackIsSaved: async () => console.warn('Check track saved not available.'),
   saveCurrentTrack: async () => console.warn('Save track not available.'),
   unsaveCurrentTrack: async () => console.warn('Unsave track not available.'),
@@ -216,76 +216,79 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
     }
   }, [isDisabled, isReady, preMuteVolume]);
 
-  const toggleShuffle = useCallback(async () => {
-    if (isDisabled || !isReady || !deviceId || playbackState === null || !isTokenManagerReady) {
-      setError('Player not ready to toggle shuffle or auth not ready.');
-      return;
-    }
-    const token = await getSpotifyToken();
-    if (!token) {
-      setError('Unable to toggle shuffle: Token not available');
-      return;
-    }
-    const newShuffleState = !playbackState.shuffle;
-    try {
-      await toggleShuffleAPI(token, deviceId, newShuffleState);
-      setError(null);
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : 'Error toggling shuffle.';
-      setError(`Error toggling shuffle: ${errorMsg}`);
-      toast.error(errorMsg);
-    }
-  }, [isDisabled, isReady, deviceId, playbackState, isTokenManagerReady]);
-
-  const playPlaylist = useCallback(
-    async (playlist: Playlist, trackIndex: number = 0) => {
+  const playPlaylistWithCustomShuffle = useCallback(
+    async (playlist: Playlist) => {
       if (isDisabled || !isReady || !deviceId || !isTokenManagerReady) {
-        const msg = 'Cannot play playlist: Player/auth not ready or device missing.';
+        const msg = 'Cannot play with custom shuffle: Player/auth not ready or device missing.';
         setError(msg);
         toast.error(msg);
+        console.warn(
+          `[MusicContext] ${msg} Conditions: isDisabled=${isDisabled}, isReady=${isReady}, deviceId=${deviceId}, isTokenManagerReady=${isTokenManagerReady}`
+        );
         return;
       }
       const token = await getSpotifyToken();
       if (!token) {
-        const msg = 'Cannot play playlist: Token not available.';
+        const msg = 'Cannot play with custom shuffle: Token not available.';
         setError(msg);
         toast.error(msg);
+        console.warn(`[MusicContext] ${msg}`);
         return;
       }
+
       if (!playlist || !playlist.spotify_id) {
-        const msg = 'Cannot play playlist: Invalid playlist data.';
+        const msg = 'Cannot play with custom shuffle: Invalid playlist data provided.';
         setError(msg);
         toast.error(msg);
+        console.warn(`[MusicContext] ${msg}`, playlist);
         return;
       }
+
+      toast.info(`Playing from playlist: ${playlist.name}`);
       try {
-        await playPlaylistAPI(token, deviceId, playlist, trackIndex);
-        setError(null);
+        await playPlaylistWithCustomShuffleAPI(token, deviceId, playlist.spotify_id);
+
         const playlistIndexInMatched = tasteMatchedPlaylists.findIndex(
           (p) => p.spotify_id === playlist.spotify_id
         );
         setCurrentPlaylistIndex(playlistIndexInMatched !== -1 ? playlistIndexInMatched : null);
         setCurrentPlaylistName(playlist.name);
+
+        setError(null);
+        // console.log(
+        //   `[MusicContext] Successfully initiated custom shuffle for playlist "${playlist.name}" (ID: ${playlist.spotify_id})`
+        // );
       } catch (e) {
-        const playlistIdentifier = playlist?.name || playlist?.spotify_id || 'Unknown Playlist';
-        let detailedErrorMessage = `Error playing playlist "${playlistIdentifier}": `;
-        if (
-          e instanceof Error &&
-          e.message &&
-          e.message.includes('Spotify API Error (403)') &&
-          e.message.includes('Restriction violated')
-        ) {
-          detailedErrorMessage += `Playback failed, possibly due to restricted content. (Spotify: ${e.message})`;
-        } else if (e instanceof Error) {
-          detailedErrorMessage += e.message;
+        const errorMsg = e instanceof Error ? e.message : 'An unknown error occurred.';
+        console.error(
+          `[MusicContext] Error playing playlist with custom shuffle (ID: ${playlist.spotify_id}):`,
+          e
+        );
+        setError(`Failed to play playlist "${playlist.name}": ${errorMsg}`);
+
+        if (errorMsg.toLowerCase().includes('no playable tracks found')) {
+          toast.error(`Could not play playlist "${playlist.name}": No playable tracks were found.`);
         } else {
-          detailedErrorMessage += 'An unknown error occurred.';
+          toast.error(`Failed to play playlist "${playlist.name}": ${errorMsg.substring(0, 100)}`);
         }
-        setError(detailedErrorMessage);
-        toast.error(detailedErrorMessage);
       }
     },
-    [isDisabled, isReady, deviceId, tasteMatchedPlaylists, isTokenManagerReady]
+    [
+      isDisabled,
+      isReady,
+      deviceId,
+      isTokenManagerReady,
+      setCurrentPlaylistIndex,
+      setCurrentPlaylistName,
+      tasteMatchedPlaylists,
+    ]
+  );
+
+  const playPlaylist = useCallback(
+    async (playlist: Playlist) => {
+      await playPlaylistWithCustomShuffle(playlist);
+    },
+    [playPlaylistWithCustomShuffle]
   );
 
   const nextPlaylist = useCallback(async () => {
@@ -525,8 +528,8 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       cb(token || '');
     };
 
-    const effectRunId = Date.now();
-    console.log(`[MusicContext PlayerInitEffect ${effectRunId}] Initializing new player.`);
+    // const effectRunId = Date.now();
+    // console.log(`[MusicContext PlayerInitEffect ${effectRunId}] Initializing new player.`);
 
     const newPlayer = new window.Spotify.Player({
       name: 'Playlist Chat Rooms Player',
@@ -643,7 +646,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       setDeviceId(null);
       setPlaybackState(null);
     };
-  }, [isDisabled, sdkReady, isTokenManagerReady, currentVolumePercent]);
+  }, [isDisabled, sdkReady, isTokenManagerReady]);
 
   // SDK Ready Effect
   useEffect(() => {
@@ -709,7 +712,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
       !isAuthenticated()
     )
       return;
-    playPlaylist(tasteMatchedPlaylists[0], 0)
+    playPlaylist(tasteMatchedPlaylists[0])
       .then(() => {
         initialPlaylistAutoPlayedRef.current = true;
       })
@@ -803,7 +806,7 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
     ensureTokenManagerInitialized()
       .then(() => {
         setIsTokenManagerReady(true);
-        console.log('[MusicContext] Token manager is initialized.');
+        // console.log('[MusicContext] Token manager is initialized.');
 
         // Initialize user session after token manager is confirmed ready
         const cleanupUserSess = initializeUserSession();
@@ -881,10 +884,10 @@ export const MusicProvider: React.FC<MusicProviderProps> = ({ children, isDisabl
         previousTrack,
         setVolume,
         toggleMute,
-        toggleShuffle,
         playPlaylist,
         nextPlaylist,
         previousPlaylist,
+        playPlaylistWithCustomShuffle,
         checkIfTrackIsSaved,
         saveCurrentTrack,
         unsaveCurrentTrack,

@@ -138,9 +138,9 @@ export function Nav({ user }: { user: User | null }) {
                             size='sm'
                             variant='ghost'
                             asChild
-                            className={`${pathname === '/profile/top-chart' ? '' : ''} justify-start pl-5`}
+                            className={`${pathname === '/profile/profile-page' ? '' : ''} justify-start pl-5`}
                           >
-                            <Link href='/profile/top-chart'>Top Chart</Link>
+                            <Link href='/profile/profile-page'>Profile page</Link>
                           </Button>
                           <Button
                             size='sm'

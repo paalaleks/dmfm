@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/hooks/use-realtime-chat';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-// import { Textarea } from "@/components/ui/textarea"; // Explicitly commenting out/removing
+import TextareaAutosize from 'react-textarea-autosize';
 import { Edit2, Trash2, Check, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -144,13 +144,13 @@ export const ChatMessageItem = ({
         <div className='relative'>
           {isEditing ? (
             <div className='w-full flex flex-col gap-1 py-1 px-1'>
-              <textarea
+              <TextareaAutosize
                 value={editText}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                   setEditText(e.target.value)
                 }
-                className='text-sm resize-none border rounded-md p-2 border-primary focus:ring-primary focus:border-primary bg-background text-foreground'
-                rows={Math.max(1, Math.min(5, editText.split('\n').length))}
+                className='text-sm resize-none border rounded-md p-2 border-primary focus:ring-primary focus:border-primary bg-background text-foreground min-w-2xs '
+                minRows={1}
                 autoFocus
               />
               <div className='flex justify-end gap-1 mt-1'>

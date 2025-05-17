@@ -12,15 +12,7 @@ import {
   Pause,
   SkipForward,
   SkipBack,
-  Shuffle,
   ListMusic,
-  // Lightbulb,
-  // LightbulbOff,
-  // ListPlus,
-  // ListMinus,
-  // CirclePlus,
-  // CircleMinus,
-  // CircleCheck,
   ChevronFirst,
   ChevronLast,
 } from 'lucide-react'; // Added Volume2, VolumeX, Shuffle, Rewind, FastForward, Heart, CheckCircle, PlusCircle
@@ -38,16 +30,12 @@ const PlayerUI = () => {
     deviceId,
     nextTrack,
     previousTrack,
-    toggleShuffle,
     nextPlaylist,
     previousPlaylist,
     isCurrentTrackSaved,
     saveCurrentTrack,
     unsaveCurrentTrack,
     currentPlaylistName,
-    // isCurrentPlaylistFollowed,
-    // followCurrentPlaylist,
-    // unfollowCurrentPlaylist,
     trackPositionMs,
     trackDurationMs,
     seek,
@@ -78,7 +66,7 @@ const PlayerUI = () => {
   return (
     <PopoverContent align='end' sideOffset={8} className='w-[310px] bg-popover shadow-lg p-4'>
       <div className='flex flex-col bg-popover overflow-hidden relative'>
-        <div className='flex items-center p-2 gap-3'>
+        <div className='flex items-center p-3 gap-3'>
           <Avatar className='h-16 w-16 rounded-md flex-shrink-0'>
             <AvatarImage src={albumArtUrl} alt={currentTrack?.album?.name || 'Album art'} />
             <AvatarFallback className='rounded-md bg-muted'>
@@ -133,8 +121,9 @@ const PlayerUI = () => {
         </div>
 
         <div className='flex justify-between items-center p-2 gap-2'>
-          <div className='flex justify-center items-center '>
-            <VolumePopover />
+          <VolumePopover />
+
+          <div className='flex justify-center items-center gap-1'>
             <Button
               variant='ghost'
               size='sm'
@@ -145,7 +134,7 @@ const PlayerUI = () => {
               }}
               disabled={!isReady || !player || !deviceId || !playbackState}
             >
-              <ChevronFirst className='h-5 w-5' />
+              <ChevronFirst className='!h-4.5 !w-4.5' />
             </Button>
             <Button
               variant='ghost'
@@ -157,7 +146,7 @@ const PlayerUI = () => {
               }}
               disabled={!isReady || !player || !deviceId || !playbackState}
             >
-              <SkipBack className='h-4 w-4' />
+              <SkipBack className='h-5 w-5' />
             </Button>
 
             <Button
@@ -172,7 +161,7 @@ const PlayerUI = () => {
               }}
               disabled={!isReady || !player || !deviceId || !playbackState}
             >
-              {playbackState?.paused ? <Play className='h-4 w-4' /> : <Pause className='h-4 w-4' />}
+              {playbackState?.paused ? <Play className='h-5 w-5' /> : <Pause className='h-5 w-5' />}
             </Button>
 
             <Button
@@ -185,7 +174,7 @@ const PlayerUI = () => {
               }}
               disabled={!isReady || !player || !deviceId || !playbackState}
             >
-              <SkipForward className='h-4 w-4' />
+              <SkipForward className='h-5 w-5' />
             </Button>
             <Button
               variant='ghost'
@@ -197,20 +186,7 @@ const PlayerUI = () => {
               }}
               disabled={!isReady || !player || !deviceId || !playbackState}
             >
-              <ChevronLast className='h-4 w-4' />
-            </Button>
-            <Button
-              variant='ghost'
-              // variant={playbackState?.shuffle ? 'default' : 'ghost'}
-              size='sm'
-              className='h-8 w-8 hover:bg-accent'
-              onClick={async (e) => {
-                e.stopPropagation();
-                if (toggleShuffle) await toggleShuffle();
-              }}
-              disabled={!isReady || !player || !deviceId || !playbackState}
-            >
-              <Shuffle className={`h-4 w-4 ${playbackState?.shuffle ? 'text-primary' : ''}`} />
+              <ChevronLast className='!h-4.5 !w-4.5' />
             </Button>
           </div>
           <Button
@@ -253,29 +229,9 @@ const PlayerUI = () => {
                 !isReady || !player || !currentPlaylistName || isCurrentPlaylistFollowed === null
               }
             >
-              {isCurrentPlaylistFollowed ? (
-                <ListMinus className='h-4 w-4' />
-              ) : (
-                <ListPlus className='h-4 w-4' />
-              )}
+              <ListMinus className='h-4 w-4' />
             </Button>
 
-            <Button
-              variant='ghost'
-              size='sm'
-              className='h-8 w-8 hover:bg-accent'
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleAutoSkipNewTracks?.();
-              }}
-              disabled={!isReady || !player}
-            >
-              {isAutoSkipNewTracksEnabled ? (
-                <Lightbulb className='h-4 w-4 text-yellow-400' />
-              ) : (
-                <LightbulbOff className='h-4 w-4' />
-              )}
-            </Button>
           </div>
         </div> */}
       </div>

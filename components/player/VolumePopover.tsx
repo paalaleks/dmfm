@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Volume2, VolumeX } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export const VolumePopover = () => {
   const { currentVolumePercent, setVolume, toggleMute, isReady, player, deviceId } = useMusic();
@@ -15,33 +14,25 @@ export const VolumePopover = () => {
 
   return (
     <Popover>
-      <TooltipProvider delayDuration={100}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                variant='ghost'
-                size='icon' // Using size='icon' for a compact button
-                className='h-8 w-8 hover:bg-accent'
-                disabled={!isReady || !player || !deviceId}
-              >
-                {isMuted ? <VolumeX className='h-4 w-4' /> : <Volume2 className='h-4 w-4' />}
-                <span className='sr-only'>{isMuted ? 'Unmute' : 'Mute'} / Adjust Volume</span>
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>{isMuted ? 'Unmute' : 'Mute'} / Adjust Volume</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <PopoverTrigger asChild>
+        <Button
+          variant='ghost'
+          size='icon' // Using size='icon' for a compact button
+          className='h-8 w-8 hover:bg-accent'
+          disabled={!isReady || !player || !deviceId}
+        >
+          {isMuted ? <VolumeX className='h-4 w-4' /> : <Volume2 className='h-4 w-4' />}
+          <span className='sr-only'>{isMuted ? 'Unmute' : 'Mute'} / Adjust Volume</span>
+        </Button>
+      </PopoverTrigger>
+
       <PopoverContent
-        className='h-fit w-auto p-0 bg-transparent border-none shadow-none flex flex-col items-center relative top-[55px] right-1'
+        className='h-fit w-auto p-0 bg-transparent border-none shadow-none flex flex-col items-center relative top-[24px]'
         side='left'
         align='end'
-        sideOffset={32}
+        sideOffset={28}
       >
-        <div className='flex flex-col items-center gap-2 bg-popover rounded-lg py-2 border border-border'>
+        <div className='flex flex-col items-center gap-2 bg-popover rounded-lg py-2 h-52'>
           <Slider
             orientation='vertical'
             value={currentVolumePercent !== null ? [currentVolumePercent] : [50]}
@@ -50,7 +41,7 @@ export const VolumePopover = () => {
             }}
             max={100}
             step={1}
-            className='h-16 data-[orientation=vertical]:w-2'
+            className='data-[orientation=vertical]:w-2'
             disabled={!isReady || !player || !deviceId}
             aria-label='Volume control'
             aria-valuemin={0}

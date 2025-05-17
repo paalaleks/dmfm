@@ -62,9 +62,26 @@ const setupProfileListener = async (supabase: ReturnType<typeof createClient>, u
       )
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
-          console.log('Subscribed to profile changes for user:', userId);
+          // console.log('Subscribed to profile changes for user:', userId);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error('Error subscribing to profile changes:', err);
+          if (err) {
+            console.error(
+              'Error subscribing to profile changes for user:',
+              userId,
+              'Status:',
+              status,
+              'Error:',
+              err
+            );
+          } else {
+            console.error(
+              'Error subscribing to profile changes for user:',
+              userId,
+              'Status:',
+              status,
+              'Error: Unknown (no error object provided).'
+            );
+          }
           // Optionally update state with an error
         }
       });
