@@ -43,5 +43,5 @@ This epic covers the foundational work required to get the "Playlist Chat Rooms"
 
 ## Key Technical Context & References
 
-*   `docs/prd.md` (Product Requirements Document)
+*   `ai/docs/prd.md` (Product Requirements Document)
 *   `

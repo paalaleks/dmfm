@@ -185,7 +185,7 @@ Stores individual chat messages sent by users in chat rooms.
 #### 2.5. `playlist_items` (Existing as `playlist_tracks`, to be Altered)
 
 *   **Purpose:** Stores details about individual tracks within the playlists stored in the `playlists` table.
-*   **Status:** Existing table (named `playlist_tracks`), will be altered for richer data and renamed conceptually in docs to `playlist_items` for clarity (actual table name `playlist_tracks` will be kept for migration simplicity if preferred, or renamed in migration). For this document, we'll use `playlist_items`.
+*   **Status:** Existing table (named `playlist_tracks`). The document has been updated to reflect its current schema in Supabase. The conceptual name `playlist_items` is used in some older parts of this document for clarity, but the actual table name is `playlist_tracks`.
 *   **Original SQL Definition (Conceptual - for context of `playlist_tracks`):**
     ```sql
     -- This reflects the state found via list_tables for playlist_tracks
@@ -194,36 +194,40 @@ Stores individual chat messages sent by users in chat rooms.
         playlist_id UUID NOT NULL REFERENCES public.playlists(id) ON DELETE CASCADE,
         track_spotify_id TEXT NOT NULL,
         track_name TEXT NOT NULL,
-        artist_names TEXT[], -- ARRAY
+        -- artist_names TEXT[] was here, now replaced by track_artists JSONB
         album_name TEXT,
         album_art_url TEXT,
         duration_ms INTEGER,
         order_in_playlist INTEGER NOT NULL, -- 0-based
-        added_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT now()
+        added_at TIMESTAMPTZ, -- Timestamp when track was added to Spotify playlist
+        created_at TIMESTAMPTZ DEFAULT now(),
+        -- Columns added based on current Supabase schema:
+        track_artists JSONB, -- Array of artist objects, e.g., [{"spotify_id": "...", "name": "..."}].
+        track_popularity INTEGER, -- Popularity of the track on Spotify (0-100).
+        track_preview_url TEXT, -- URL to a 30-second preview of the track.
+        audio_features JSONB -- Detailed audio features from Spotify (e.g., danceability, energy, valence).
     );
     ```
-*   **Planned Alterations (on `playlist_tracks`):**
-    *   Change `artist_names TEXT[]` to `track_artists JSONB`.
-    *   Add `track_popularity INTEGER`.
-    *   Add `track_preview_url TEXT`.
-    *   Add `audio_features JSONB`.
-    *   Rename `album_art_url` to `track_album_image_url` for consistency if desired, or keep.
-    *   Rename `order_in_playlist` to `position` for consistency if desired, or keep.
-*   **Columns (Post-Alteration, using conceptual name `playlist_items`):**
-    *   `id (BIGSERIAL, PK)`: Internal unique identifier for the playlist item record.
+*   **Notes on Alterations (Compared to previous state of this document):**
+    *   `artist_names TEXT[]` was replaced by `track_artists JSONB`.
+    *   `track_popularity INTEGER` was added.
+    *   `track_preview_url TEXT` was added.
+    *   `audio_features JSONB` was added.
+    *   Column names like `album_art_url`, `order_in_playlist`, `album_name`, `duration_ms`, `added_at` are retained from the original `playlist_tracks` table and not renamed as previously conceptualized in this document (e.g. `track_album_image_url`, `position`).
+*   **Columns (Reflecting current `playlist_tracks` in Supabase):**
+    *   `id (BIGSERIAL, PK)`: Internal unique identifier for the playlist track record.
     *   `playlist_id (UUID, FK, NOT NULL)`: Foreign key referencing `public.playlists.id`.
     *   `track_spotify_id (TEXT, NOT NULL)`: The unique Spotify ID for the track.
-    *   `position (INTEGER, NOT NULL)`: The 0-based position of the track within the Spotify playlist (was `order_in_playlist`).
+    *   `order_in_playlist (INTEGER, NOT NULL)`: The 0-based position of the track within the Spotify playlist.
     *   `track_name (TEXT, NOT NULL)`: Name of the track.
-    *   `track_artists (JSONB)`: Array of artist objects, e.g., `[{"spotify_id": "...", "name": "..."}]`. (Was `artist_names TEXT[]`).
-    *   `track_album_name (TEXT)`: Name of the track's album. (Was `album_name`).
-    *   `track_album_image_url (TEXT)`: URL for the track's album cover. (Was `album_art_url`).
-    *   `track_duration_ms (INTEGER)`: Duration of the track in milliseconds. (Was `duration_ms`).
-    *   `track_popularity (INTEGER)`: Popularity of the track on Spotify (0-100). (New)
-    *   `track_preview_url (TEXT)`: URL to a 30-second preview of the track. (New)
-    *   `audio_features (JSONB)`: Detailed audio features from Spotify (e.g., danceability, energy, valence). (New)
-    *   `added_to_spotify_playlist_at (TIMESTAMPTZ)`: Timestamp when the track was added to the original Spotify playlist. (Was `added_at`).
+    *   `track_artists (JSONB)`: Array of artist objects, e.g., `[{"spotify_id": "...", "name": "..."}]`.
+    *   `album_name (TEXT)`: Name of the track's album.
+    *   `album_art_url (TEXT)`: URL for the track's album cover.
+    *   `duration_ms (INTEGER)`: Duration of the track in milliseconds.
+    *   `track_popularity (INTEGER)`: Popularity of the track on Spotify (0-100).
+    *   `track_preview_url (TEXT)`: URL to a 30-second preview of the track.
+    *   `audio_features (JSONB)`: Detailed audio features from Spotify (e.g., danceability, energy, valence).
+    *   `added_at (TIMESTAMPTZ)`: Timestamp when the track was added to the original Spotify playlist.
     *   `created_at (TIMESTAMPTZ)`: Timestamp of when the record was created in our database.
 *   **RLS Policies (Example for new state - to be confirmed/refined in migration):**
     *   `CREATE POLICY "Authenticated users can view all playlist items." ON public.playlist_tracks FOR SELECT USING (auth.role() = 'authenticated');`
@@ -288,10 +292,11 @@ Stores individual chat messages sent by users in chat rooms.
     *   `CREATE POLICY "Users can insert/update their own top tracks." ON public.user_top_tracks FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`
     *   `CREATE POLICY "Service role can manage user top tracks." ON public.user_top_tracks FOR ALL USING (auth.role() = 'service_role');`
 
-#### 2.8. `user_playlist_interactions` (New Table)
+#### 2.8. `user_playlist_interactions` (Planned Table)
 
+*   **Status: Defined in documentation but not yet implemented in the database.**
 *   **Purpose:** Tracks various ways users interact with playlists within the application.
-*   **SQL Definition:**
+*   **SQL Definition (Proposed):**
     ```sql
     CREATE TABLE public.user_playlist_interactions (
         id BIGSERIAL PRIMARY KEY,
@@ -311,10 +316,107 @@ Stores individual chat messages sent by users in chat rooms.
     *   `CREATE POLICY "Users can insert their own interactions." ON public.user_playlist_interactions FOR INSERT WITH CHECK (auth.uid() = user_id);`
     *   `CREATE POLICY "Service role can manage interactions." ON public.user_playlist_interactions FOR ALL USING (auth.role() = 'service_role');`
 
+#### 2.9. `user_playlist_matches` (New Table - Exists in Supabase)
+
+*   **Purpose:** Stores records of users matched with candidate playlists by the taste-matching algorithm. (Comment from Supabase)
+*   **SQL Definition:**
+    ```sql
+    CREATE TABLE public.user_playlist_matches (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+        playlist_id UUID NOT NULL REFERENCES public.playlists(id) ON DELETE CASCADE,
+        matched_at TIMESTAMPTZ DEFAULT now() NOT NULL
+    );
+    COMMENT ON TABLE public.user_playlist_matches IS 'Stores records of users matched with candidate playlists by the taste-matching algorithm.';
+    COMMENT ON COLUMN public.user_playlist_matches.user_id IS 'The user who was matched with the playlist. References public.profiles(id).';
+    COMMENT ON COLUMN public.user_playlist_matches.playlist_id IS 'The playlist the user was matched with. References public.playlists(id).';
+    COMMENT ON COLUMN public.user_playlist_matches.matched_at IS 'Timestamp when the match was identified.';
+    ```
+*   **Columns:**
+    *   `id (UUID, PK)`: Unique identifier for the playlist match instance.
+    *   `user_id (UUID, FK, NOT NULL)`: Foreign key referencing `public.profiles(id)`.
+    *   `playlist_id (UUID, FK, NOT NULL)`: Foreign key referencing `public.playlists(id)`.
+    *   `matched_at (TIMESTAMPTZ, NOT NULL)`: Timestamp when the match was identified.
+*   **RLS Policies:**
+    *   RLS is enabled on this table in Supabase. Specific policies to be defined based on application requirements.
+    *   Example policies:
+        *   `CREATE POLICY "Users can view their own matches." ON public.user_playlist_matches FOR SELECT USING (auth.uid() = user_id);`
+        *   `CREATE POLICY "Service role can manage matches." ON public.user_playlist_matches FOR ALL USING (auth.role() = 'service_role');`
+
+#### 2.10. `song_likes` (New Table - Exists in Supabase)
+
+*   **Purpose:** Stores user song likes/saves. (Comment from Supabase)
+*   **SQL Definition:**
+    ```sql
+    CREATE TABLE public.song_likes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+        track_spotify_id TEXT NOT NULL,
+        liked_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT now() NOT NULL
+    );
+    COMMENT ON TABLE public.song_likes IS 'Stores user song likes/saves.';
+    COMMENT ON COLUMN public.song_likes.user_id IS 'Link to the user in public.profiles.';
+    COMMENT ON COLUMN public.song_likes.track_spotify_id IS 'Spotify ID for the liked track.';
+    COMMENT ON COLUMN public.song_likes.liked_at IS 'Timestamp when the user liked the song.';
+    COMMENT ON COLUMN public.song_likes.created_at IS 'Timestamp when the record was created.';
+    ```
+*   **Columns:**
+    *   `id (UUID, PK)`: Unique identifier for the like record.
+    *   `user_id (UUID, FK, NOT NULL)`: Foreign key referencing `public.profiles(id)`.
+    *   `track_spotify_id (TEXT, NOT NULL)`: The Spotify ID of the liked track.
+    *   `liked_at (TIMESTAMPTZ, NOT NULL)`: Timestamp when the song was liked.
+    *   `created_at (TIMESTAMPTZ, NOT NULL)`: Timestamp when the record was created.
+*   **RLS Policies:**
+    *   RLS is enabled on this table in Supabase. Specific policies to be defined based on application requirements.
+    *   Example policies:
+        *   `CREATE POLICY "Users can manage their own song likes." ON public.song_likes FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`
+        *   `CREATE POLICY "Service role can manage song likes." ON public.song_likes FOR ALL USING (auth.role() = 'service_role');`
+
+#### 2.11. `playlist_track_artist_aggregates` (New Table - Exists in Supabase)
+
+*   **Purpose:** Stores aggregated track and artist data for each playlist. (Comment from Supabase)
+*   **SQL Definition:**
+    ```sql
+    CREATE TABLE public.playlist_track_artist_aggregates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        playlist_id UUID NOT NULL REFERENCES public.playlists(id) ON DELETE CASCADE UNIQUE,
+        user_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL, -- User who imported/created this aggregation
+        tracks_json JSONB DEFAULT '[]'::jsonb NOT NULL,
+        artists_json JSONB DEFAULT '[]'::jsonb NOT NULL,
+        total_tracks INTEGER DEFAULT 0 NOT NULL,
+        distinct_artist_count INTEGER DEFAULT 0 NOT NULL,
+        last_aggregated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT now() NOT NULL
+    );
+    COMMENT ON TABLE public.playlist_track_artist_aggregates IS 'Stores aggregated track and artist data for each playlist.';
+    COMMENT ON COLUMN public.playlist_track_artist_aggregates.playlist_id IS 'FK to the playlists table. Each playlist has one aggregate entry.';
+    COMMENT ON COLUMN public.playlist_track_artist_aggregates.user_id IS 'FK to the profiles table, indicating the user associated with this aggregation (e.g., importer). Can be NULL.';
+    COMMENT ON COLUMN public.playlist_track_artist_aggregates.tracks_json IS 'JSONB array of track objects from the playlist.';
+    COMMENT ON COLUMN public.playlist_track_artist_aggregates.artists_json IS 'JSONB array of unique artists from the playlist, each with their spotify_artist_id, name, and playlist_occurrences count.';
+    COMMENT ON COLUMN public.playlist_track_artist_aggregates.last_aggregated_at IS 'Timestamp of the last aggregation update.';
+    ```
+*   **Columns:**
+    *   `id (UUID, PK)`: Unique identifier for the aggregation record.
+    *   `playlist_id (UUID, FK, NOT NULL, UNIQUE)`: Foreign key referencing `public.playlists(id)`.
+    *   `user_id (UUID, FK, NULLABLE)`: Foreign key referencing `public.profiles(id)`. User who initiated the aggregation.
+    *   `tracks_json (JSONB, NOT NULL)`: JSON array of track objects.
+    *   `artists_json (JSONB, NOT NULL)`: JSON array of unique artist objects with occurrence counts.
+    *   `total_tracks (INTEGER, NOT NULL)`: Total number of tracks in `tracks_json`.
+    *   `distinct_artist_count (INTEGER, NOT NULL)`: Total number of distinct artists in `artists_json`.
+    *   `last_aggregated_at (TIMESTAMPTZ, NOT NULL)`: Timestamp of the last aggregation.
+    *   `created_at (TIMESTAMPTZ, NOT NULL)`: Timestamp when the record was created.
+*   **RLS Policies:**
+    *   RLS is enabled on this table in Supabase. Specific policies to be defined based on application requirements.
+    *   Example policies:
+        *   `CREATE POLICY "Authenticated users can view aggregates." ON public.playlist_track_artist_aggregates FOR SELECT USING (auth.role() = 'authenticated');`
+        *   `CREATE POLICY "Service role can manage aggregates." ON public.playlist_track_artist_aggregates FOR ALL USING (auth.role() = 'service_role');`
+
+#### User Taste Profiles (`user_taste_profiles`) (Historical)
 
 *   **Purpose (Original):** Stores aggregated music taste information for users based on their Spotify activity.
-*   **Status:** Existing table. Its future is undetermined; it might be deprecated in favor of granular `user_top_artists`/`user_top_tracks` or serve as an aggregated summary. No changes planned in this story.
-*   **Existing SQL Definition (Conceptual - from list_tables):**
+*   **Status:** Previously described as an existing table, but **not currently found** in the Supabase database (as of latest check). Its functionality might be covered by `user_top_artists` and `user_top_tracks` or is pending re-evaluation.
+*   **Original SQL Definition (Conceptual - from previous documentation state):**
     ```sql
     CREATE TABLE public.user_taste_profiles (
         user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -339,12 +441,17 @@ erDiagram
     profiles ||--o{ user_top_tracks : "has top tracks"
     profiles ||--o{ user_playlist_interactions : "interacts with"
     profiles ||--o{ playlists : "submits" (submitted_by_user_id)
-    profiles ||--|| user_taste_profiles : "has taste profile (1-to-1, existing)"
+    profiles ||--o{ user_playlist_matches : "is matched to playlists"
+    profiles ||--o{ song_likes : "likes songs"
+    profiles ||--o{ playlist_track_artist_aggregates : "associated with aggregates"
+    %% profiles ||--|| user_taste_profiles : "has taste profile (1-to-1, HISTORICAL - NOT FOUND)"
 
     chat_rooms ||--o{ chat_messages : "contains"
 
-    playlists ||--o{ playlist_items : "contains items"
-    playlists ||--o{ user_playlist_interactions : "is target of interaction"
+    playlists ||--o{ playlist_tracks : "contains tracks" %% Renamed from playlist_items
+    playlists ||--o{ user_playlist_interactions : "is target of interaction (PLANNED)"
+    playlists ||--o{ user_playlist_matches : "is target of match"
+    playlists ||--o{ playlist_track_artist_aggregates : "has aggregation"
 
     "auth.users" {
         UUID id PK "Supabase Auth User ID"
@@ -392,20 +499,20 @@ erDiagram
         TIMESTAMPTZ last_fetched_from_spotify_at
     }
 
-    playlist_items {
+    playlist_tracks { %% Actual table name
         BIGINT id PK "BIGSERIAL"
         UUID playlist_id FK "to playlists.id"
         TEXT track_spotify_id
-        INTEGER position
+        INTEGER order_in_playlist %% Actual column name
         TEXT track_name
         JSONB track_artists
-        TEXT track_album_name
-        TEXT track_album_image_url
-        INTEGER track_duration_ms
+        TEXT album_name %% Actual column name
+        TEXT album_art_url %% Actual column name
+        INTEGER duration_ms %% Actual column name
         INTEGER track_popularity
         TEXT track_preview_url
         JSONB audio_features
-        TIMESTAMPTZ added_to_spotify_playlist_at
+        TIMESTAMPTZ added_at %% Actual column name
         TIMESTAMPTZ created_at
     }
 
@@ -433,13 +540,40 @@ erDiagram
         TIMESTAMPTZ fetched_at
     }
 
-    user_playlist_interactions {
+    user_playlist_interactions { %% PLANNED TABLE
         BIGINT id PK "BIGSERIAL"
         UUID user_id FK "to profiles.id"
         UUID playlist_id FK "to playlists.id"
         TEXT interaction_type
         TIMESTAMPTZ interacted_at
         JSONB metadata
+    }
+
+    user_playlist_matches { %% NEWLY ADDED FROM SUPABASE
+        UUID id PK
+        UUID user_id FK "to profiles.id"
+        UUID playlist_id FK "to playlists.id"
+        TIMESTAMPTZ matched_at
+    }
+
+    song_likes { %% NEWLY ADDED FROM SUPABASE
+        UUID id PK
+        UUID user_id FK "to profiles.id"
+        TEXT track_spotify_id
+        TIMESTAMPTZ liked_at
+        TIMESTAMPTZ created_at
+    }
+
+    playlist_track_artist_aggregates { %% NEWLY ADDED FROM SUPABASE
+        UUID id PK
+        UUID playlist_id FK "to playlists.id"
+        UUID user_id FK "to profiles.id (nullable)"
+        JSONB tracks_json
+        JSONB artists_json
+        INTEGER total_tracks
+        INTEGER distinct_artist_count
+        TIMESTAMPTZ last_aggregated_at
+        TIMESTAMPTZ created_at
     }
 ```
 

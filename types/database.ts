@@ -256,6 +256,38 @@ export type Database = {
         };
         Relationships: [];
       };
+      song_likes: {
+        Row: {
+          created_at: string;
+          id: string;
+          liked_at: string;
+          track_spotify_id: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          liked_at?: string;
+          track_spotify_id: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          liked_at?: string;
+          track_spotify_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'song_likes_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       user_playlist_matches: {
         Row: {
           id: string;

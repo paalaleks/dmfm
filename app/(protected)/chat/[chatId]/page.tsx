@@ -1,132 +1,136 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
-import type { MessageSenderProfile, ChatMessage } from '@/hooks/use-realtime-chat';
-// import RealtimeChatLoader from '@/components/realtime-chat-loader'; // Added
-import { RealtimeChat } from '@/components/realtime-chat';
-import { Suspense } from 'react';
+import { createClient as createSupabaseClient } from '@/lib/supabase/server';
+import { RealtimeChat } from '@/components/chat-ui/realtime-chat';
+import { notFound } from 'next/navigation';
+import type { Tables } from '@/types/database';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ChatMessage as RealtimeChatMessage } from '@/hooks/use-realtime-chat';
 
-interface RawChatMessageFromDB {
-  id: string | number;
-  content: string;
-  created_at: string;
-  user_id: string;
-  room_id: string;
-  profile: MessageSenderProfile | MessageSenderProfile[] | null;
+type ChatMessageRow = Tables<'chat_messages'>;
+type ProfileRow = Tables<'profiles'>;
+type ChatRoomRow = Tables<'chat_rooms'>;
+
+type DbChatMessageWithProfile = ChatMessageRow & {
+  profile: Pick<ProfileRow, 'username' | 'avatar_url'> | null;
+};
+
+interface ChatPageProps {
+  params: {
+    chatId: string;
+  };
 }
 
-interface ChatRoomPagePromise {
-  params: Promise<{
-    chatId: string; // This will be the UUID of the chat room from the URL
-  }>;
+async function getChatRoomDetails(
+  supabase: SupabaseClient,
+  roomId: string
+): Promise<ChatRoomRow | null> {
+  const { data: room, error } = await supabase
+    .from('chat_rooms')
+    .select('id, name, description, created_at, is_default_room')
+    .eq('id', roomId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching chat room details:', error);
+    return null;
+  }
+  return room;
 }
 
-export default async function ChatRoomPage({ params }: ChatRoomPagePromise) {
-  const { chatId } = await params;
-  const supabase = await createClient();
-
-  // Fetch user and initial messages in parallel
-  const [userAuthResult, initialMessagesResult] = await Promise.all([
-    supabase.auth.getUser(),
-    supabase
-      .from('chat_messages')
-      .select(
-        `
-        id,
-        content,
-        created_at,
-        user_id,
-        room_id,
-        profile:profiles (
-          id,
-          username,
-          avatar_url
-        )
+async function getInitialMessages(
+  supabase: SupabaseClient,
+  roomId: string
+): Promise<RealtimeChatMessage[]> {
+  const { data: messages, error } = await supabase
+    .from('chat_messages')
+    .select(
       `
+      id,
+      content,
+      created_at,
+      user_id,
+      room_id,
+      profile:profiles (
+        username,
+        avatar_url
       )
-      .eq('room_id', chatId)
-      .order('created_at', { ascending: true })
-      .limit(50),
-  ]);
+    `
+    )
+    .eq('room_id', roomId)
+    .order('created_at', { ascending: true })
+    .limit(50);
+
+  console.log('[ChatPage] Raw messages from Supabase:', JSON.stringify(messages, null, 2));
+
+  if (error) {
+    console.error('Error fetching initial messages:', error);
+    return [];
+  }
+
+  // More assertive cast, trusting runtime logs that profile is an object
+  const dbMessages = (messages || []) as unknown as DbChatMessageWithProfile[];
+
+  return dbMessages.map((msg) => {
+    const userProfile = msg.profile;
+    console.log(
+      `[ChatPage] Mapping message for user_id=${msg.user_id}, raw_profile_object=${JSON.stringify(msg.profile)}, derived_userProfile=${JSON.stringify(userProfile)}`
+    );
+    return {
+      id: msg.id.toString(),
+      content: msg.content,
+      createdAt: msg.created_at || new Date().toISOString(),
+      user: {
+        name: userProfile?.username || 'Unknown User',
+        avatarUrl: userProfile?.avatar_url || null,
+      },
+    };
+  });
+}
+
+export default async function ChatPage({ params }: ChatPageProps) {
+  const { chatId } = params;
+  const supabase: SupabaseClient = await createSupabaseClient();
 
   const {
     data: { user },
-    error: userError,
-  } = userAuthResult;
+    error: authError,
+  } = await supabase.auth.getUser();
 
-  if (userError || !user) {
-    console.error('Error fetching user or user not authenticated:', userError);
-    redirect('/login');
-    return; // Stop further execution
+  if (authError || !user) {
+    console.error('Auth error or no user:', authError);
+    return <div>User authentication failed. Please try logging in again.</div>;
   }
 
-  const userId = user.id;
-
-  // Fetch current user's profile (depends on userId)
-  const { data: currentUserProfileData, error: profileError } = await supabase
+  const { data: userProfileData, error: profileError } = await supabase
     .from('profiles')
-    .select('id, username, avatar_url') // Fetch id, username, and avatar_url
-    .eq('id', userId)
-    .single<MessageSenderProfile>(); // Cast to MessageSenderProfile
+    .select('id, username, avatar_url, updated_at, spotify_user_id')
+    .eq('id', user.id)
+    .single();
 
-  if (profileError || !currentUserProfileData) {
-    console.error(`Error fetching full profile for user ${userId}:`, profileError);
-    redirect('/login?error=profile_fetch_failed');
-    return; // Stop further execution
+  if (profileError || !userProfileData) {
+    console.error('Error fetching user profile:', profileError);
+    return <div>Error loading user profile. Ensure your profile is set up.</div>;
+  }
+  const currentUserProfile: ProfileRow = userProfileData;
+
+  console.log(
+    '[ChatPage] Current user profile from Supabase:',
+    JSON.stringify(userProfileData, null, 2)
+  );
+
+  const chatRoom = await getChatRoomDetails(supabase, chatId);
+  if (!chatRoom) {
+    console.warn(`Chat room with ID ${chatId} not found.`);
+    notFound();
   }
 
-  // Explicitly check if username is null or empty after successful profile fetch
-  if (!currentUserProfileData.username) {
-    console.error(`Username is missing for user ${userId}:`);
-    redirect('/login?error=username_missing');
-    return; // Stop further execution
-  }
-
-  const currentUserProfile = currentUserProfileData;
-
-  // Process initial messages
-  let initialMessages: ChatMessage[] = [];
-  const { data: initialMessagesData, error: messagesError } = initialMessagesResult;
-
-  if (messagesError) {
-    console.error(`Error fetching initial messages for room ${chatId}:`, messagesError);
-  } else if (initialMessagesData) {
-    initialMessages = initialMessagesData
-      .map((msg: RawChatMessageFromDB) => {
-        let userProfile: MessageSenderProfile | null = null;
-        if (msg.profile) {
-          if (Array.isArray(msg.profile)) {
-            userProfile = msg.profile.length > 0 ? (msg.profile[0] as MessageSenderProfile) : null;
-          } else {
-            userProfile = msg.profile as MessageSenderProfile;
-          }
-        }
-
-        if (!msg.created_at) {
-          console.warn(
-            'Message found with null created_at, using current time as fallback:',
-            msg.id
-          );
-        }
-
-        return {
-          id: msg.id as number | string,
-          clientSideId: msg.id.toString(),
-          content: msg.content as string,
-          created_at: msg.created_at || new Date().toISOString(),
-          profile: userProfile,
-          isOptimistic: false,
-        };
-      })
-      .filter(Boolean) as ChatMessage[];
-  }
+  const initialMessages = await getInitialMessages(supabase, chatId);
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <RealtimeChat // Changed
-        roomName={chatId}
-        currentUserProfile={currentUserProfile}
-        initialMessages={initialMessages}
-      />
-    </Suspense>
+    <RealtimeChat
+      roomName={chatId}
+      username={currentUserProfile.username || 'Anonymous'}
+      messages={initialMessages}
+      userAvatarUrl={currentUserProfile.avatar_url || null}
+    />
   );
 }
